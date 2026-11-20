@@ -210,3 +210,50 @@ class Window:
 
 if __name__ == "__main__":
     Window().run()
+
+
+def build_intro_part(config, log):
+    """Generate a video+audio intro as the first ordinary timeline part."""
+    from pathlib import Path
+    folder = str(config.get("interview_folder", "")).strip()
+    if not folder:
+        raise ValueError("Choose an interview folder")
+    scripts = sorted(Path(config["txt"]).glob("*.txt"))
+    if not scripts:
+        raise ValueError("Opening TXT not found")
+    # Match the first numbered script to the first numbered voice.
+    import app
+    indexed_scripts = app.indexed(config["txt"], {".txt"})
+    opening_number = min(indexed_scripts)
+    script = indexed_scripts[opening_number].read_text(encoding="utf-8-sig")
+    results = scan(folder, script, log)
+    if not results:
+        raise RuntimeError("No coherent interview passage found; export cancelled")
+    best = results[0]
+    if best["relevance"] < 0.06:
+        raise RuntimeError("No sufficiently relevant interview passage; choose manually")
+    out = Path(config["out"]) / "_interview_intro"
+    out.mkdir(parents=True, exist_ok=True)
+    clip = export_clip(best, out / "selected_interview_intro.mp4")
+    fps = int(config["fps"])
+    frames = max(1, round(best["duration"] * fps))
+    dur = frames / fps
+    log("INTERVIEW INTRO: " + best["transcript"])
+    log("Original interview audio preserved; verify speaker and footage rights.")
+    return {"number": 0, "voice": str(clip), "duration": dur,
+            "clips": [{"part": 0, "type": "video", "source": str(clip),
+                       "source_start": 0.0, "start": 0.0,
+                       "frames": frames, "duration": dur, "effect": "Tĩnh"}]}
+
+
+def prepend_intro(parts, intro):
+    """Return new timeline with every later scene offset by the intro duration."""
+    import copy
+    result = [intro]
+    offset = intro["duration"]
+    for original in parts:
+        part = copy.deepcopy(original)
+        for clip in part["clips"]:
+            clip["start"] += offset
+        result.append(part)
+    return result
