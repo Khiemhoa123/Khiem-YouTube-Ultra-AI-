@@ -66,12 +66,19 @@ def export(c,parts,log):
      pt=copy.deepcopy(zoom_template['keyframe_list'][0]); pt.update(id=uid(),time_offset=round(frac*length),values=[a+(b-a)*(1-math.cos(math.pi*frac))/2]); key['keyframe_list'].append(pt)
     s['common_keyframes']=[key]
   tracks['audio' if kind=='audio' else 'video']['segments'].append(s)
+ intro=c.get('_interview_intro')
  elapsed=0.
+ if intro:
+  us=round(float(intro['source_start'])*1e6)
+  end=round(float(intro['duration'])*1e6)
+  add('video',intro['source'],0,end,us,'Tĩnh')
+  add('audio',intro['source'],0,end,us)
+  elapsed=float(intro['duration'])
  for p in parts:
   begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
   clips=p['clips']
   for i,s in enumerate(clips):
-   start=begin if i==0 else round(s['start']*1e6); stop=end if i==len(clips)-1 else round(clips[i+1]['start']*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
+   start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round(clips[i+1]['start']*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
  meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for p in seen)); meta['draft_materials'][0]['value']=entries
  project.update(id=uid(),main_timeline_id=tid,create_time=now,update_time=now); project['timelines'][0].update(id=tid,create_time=now,update_time=now); layout['dockItems'][0]['timelineIds']=[tid]; store['draft_virtual_store'][1]['value']=[{'child_id':e['id'],'parent_id':''} for e in entries]
