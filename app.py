@@ -430,20 +430,20 @@ def plan(c, log):
                 else None
             )
 
-        while pos < target:
-            preferred = pattern[
-                len(clips) % len(pattern)
-            ]
-            selected = None
+        smart_timeline = str(c.get('smart_timeline', '1')).lower() not in ('0', 'false', 'off')
+        min_video = max(0.0, min(1.0, float(c.get('min_video_percent', 40)) / 100))
+        goal_video = max(min_video, min(1.0, float(c.get('target_video_percent', 60)) / 100))
+        video_frames = 0
+        warned_shortage = False
 
-            for kind in (
-                preferred,
-                (
-                    'image'
-                    if preferred == 'video'
-                    else 'video'
-                )
-            ):
+        while pos < target:
+            preferred = pattern[len(clips) % len(pattern)]
+            selected = None
+            options = []
+            kinds = ('video', 'image') if smart_timeline else (
+                preferred, 'image' if preferred == 'video' else 'video'
+            )
+            for kind in kinds:
                 nf = min(
                     target - pos,
                     max(
@@ -488,15 +488,38 @@ def plan(c, log):
                     ))
                 )
 
-                selected = pick(
-                    kind,
-                    nf,
-                    context,
-                    query
-                )
+                candidate = pick(kind, nf, context, query)
+                if candidate:
+                    options.append((kind, nf, candidate))
+                    if not smart_timeline:
+                        break
 
-                if selected:
-                    break
+            if smart_timeline and options:
+                def option_score(option):
+                    kind_, nf_, item_ = option
+                    base = item_[0]
+                    if kind_ != 'video':
+                        return base
+                    current = video_frames / max(1, pos)
+                    projected = (video_frames + nf_) / max(1, pos + nf_)
+                    if projected < min_video:
+                        return base + 0.65
+                    if current < goal_video:
+                        return base + 0.28
+                    return base
+
+                videos = [o for o in options if o[0] == 'video']
+                need_video = video_frames < min_video * (pos + max(o[1] for o in options))
+                if need_video and videos:
+                    chosen = max(videos, key=option_score)
+                else:
+                    chosen = max(options, key=option_score)
+                kind, nf, selected = chosen
+                if need_video and not videos and not warned_shortage:
+                    log(f'Phần {n}: thiếu video phù hợp, tiếp tục với ảnh.')
+                    warned_shortage = True
+            elif options:
+                kind, nf, selected = options[0]
 
             if not selected:
                 raise ValueError(
@@ -549,6 +572,15 @@ def plan(c, log):
             ))
 
             pos += nf
+            if kind == 'video':
+                video_frames += nf
+
+        if smart_timeline:
+            actual = 100 * video_frames / max(1, target)
+            log(f'AI SMART TIMELINE phần {n}: video {actual:.1f}% theo thời lượng; '
+                f'tối thiểu {min_video*100:.0f}%, mục tiêu {goal_video*100:.0f}%.')
+            if actual + 0.01 < min_video * 100:
+                log(f'CẢNH BÁO: Phần {n} không đủ video để đạt tỷ lệ tối thiểu.')
 
         parts.append(dict(
             number=n,
