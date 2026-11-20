@@ -21,6 +21,7 @@ COLORS = {
 }
 
 DEFAULTS = {
+    "interview_folder": "",
     "voice": "",
     "txt": "",
     "images": "",
@@ -100,6 +101,7 @@ class KhiemYoutube:
             )
         }
 
+        self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
         self.busy = False
         self.progress = tk.DoubleVar(value=0)
         self.buttons = []
@@ -114,7 +116,7 @@ class KhiemYoutube:
             )
 
         for var in [
-            self.gpu, self.ai, self.align,
+            self.gpu, self.ai, self.align, self.interview_enabled,
             *self.effects.values()
         ]:
             var.trace_add(
@@ -143,6 +145,7 @@ class KhiemYoutube:
         }
 
         config.update({
+            "interview_enabled": self.interview_enabled.get(),
             "gpu": self.gpu.get(),
             "ai": self.ai.get(),
             "align": self.align.get(),
@@ -410,6 +413,7 @@ class KhiemYoutube:
         )
 
         folders = [
+            ("interview_folder", "Thư mục video phỏng vấn"),
             ("voice", "Thư mục Voice MP3"),
             ("txt", "Thư mục TXT"),
             ("images", "Thư mục ảnh"),
@@ -425,6 +429,8 @@ class KhiemYoutube:
                 key,
                 label
             )
+
+        ttk.Checkbutton(self.project_tab, text="SMART INTERVIEW INTRO (30s max, original audio)", variable=self.interview_enabled).pack(anchor="w", pady=8)
 
         ttk.Label(
             self.project_tab,
@@ -771,6 +777,11 @@ class KhiemYoutube:
                 config,
                 logger
             )
+
+            if config.get("interview_enabled") and mode != "check":
+                from smart_interview_intro import build_intro_part, prepend_intro
+                intro = build_intro_part(config, logger)
+                parts = prepend_intro(parts, intro)
 
             timeline = (
                 Path(config["out"])
