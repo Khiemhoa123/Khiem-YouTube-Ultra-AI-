@@ -41,12 +41,12 @@ def export(c,parts,log):
   path=str(Path(path).resolve()).replace('\\','/'); length=end-start
   if length<=0:return
   _,s,m,k=templates[kind]; s=copy.deepcopy(s); m=copy.deepcopy(m); info=probe(path); streams=info['streams']; visual=next((v for v in streams if v['codec_type']=='video'),{}); width=visual.get('width',0); height=visual.get('height',0); full=10800000000 if kind=='image' else max(source_start+length,round(float(info['format'].get('duration',0))*1e6))
-  if path not in seen:
+  if (kind,path) not in seen:
    mid=uid(); m.update(id=mid,unique_id=uuid.uuid4().hex,path=path,duration=full)
    if kind!='audio': m.update(width=width,height=height,has_audio=any(v['codec_type']=='audio' for v in streams))
    for field in ('name','material_name'):
     if field in m:m[field]=Path(path).name
-   mts[k].append(m); seen[path]=mid
+   mts[k].append(m); seen[(kind,path)]=mid
    entry=copy.deepcopy(next(x for x in meta['draft_materials'][0]['value'] if x['metetype']=={'audio':'music','image':'photo','video':'video'}[kind])); entry.update(id=uid(),file_Path=path,extra_info=Path(path).name,width=width,height=height,duration=length if kind=='image' else full,create_time=now//1000000,import_time=now//1000000,import_time_ms=now); entry['roughcut_time_range']={'start':-1,'duration':-1} if kind=='image' else {'start':0,'duration':full}; entries.append(entry)
   refs=[]
   for old in s['extra_material_refs']:
@@ -56,7 +56,7 @@ def export(c,parts,log):
     if c.get('background')=='Nền mờ':em.update(type='canvas_blur',blur=min(1,max(0,float(c.get('blur',30))/80)))
     else:em.update(type='canvas_color',color='#000000',blur=0)
    mts[ek].append(em); refs.append(em['id'])
-  s.update(id=uid(),material_id=seen[path],extra_material_refs=refs,common_keyframes=[],keyframe_refs=[],source_timerange={'start':source_start,'duration':length},target_timerange={'start':start,'duration':length},speed=1.,volume=1. if kind=='audio' else 0.)
+  s.update(id=uid(),material_id=seen[(kind,path)],extra_material_refs=refs,common_keyframes=[],keyframe_refs=[],source_timerange={'start':source_start,'duration':length},target_timerange={'start':start,'duration':length},speed=1.,volume=1. if kind=='audio' else 0.)
   if kind!='audio':
    z=float(c['iz'] if kind=='image' else c['vz'])/100; a,b=(1,z) if effect=='Zoom in' else (z,1) if effect=='Zoom out' else (1,1); a,b=(z,z) if kind=='video' else (a,b); s['clip']['scale']={'x':a,'y':a}
    if a!=b:
@@ -80,7 +80,7 @@ def export(c,parts,log):
   for i,s in enumerate(clips):
    start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round(clips[i+1]['start']*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
- meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for p in seen)); meta['draft_materials'][0]['value']=entries
+ meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for _,p in seen)); meta['draft_materials'][0]['value']=entries
  project.update(id=uid(),main_timeline_id=tid,create_time=now,update_time=now); project['timelines'][0].update(id=tid,create_time=now,update_time=now); layout['dockItems'][0]['timelineIds']=[tid]; store['draft_virtual_store'][1]['value']=[{'child_id':e['id'],'parent_id':''} for e in entries]
  # Write matching root and nested timeline, without stale attachment IDs.
  try:
