@@ -72,13 +72,24 @@ def export(c,parts,log):
   us=round(float(intro['source_start'])*1e6)
   end=round(float(intro['duration'])*1e6)
   add('video',intro['source'],0,end,us,'Tĩnh')
-  add('audio',intro['source'],0,end,us)
+  # CapCut music material needs an audio file, not an MP4 path.
+  audio_dir=Path(c['out'])/'_interview_audio'
+  audio_dir.mkdir(parents=True,exist_ok=True)
+  audio_path=audio_dir/(Path(intro['source']).stem+'_'+str(round(float(intro['source_start'])*1000))+'_'+str(round(float(intro['duration'])*1000))+'.wav')
+  if not audio_path.is_file() or audio_path.stat().st_size<1024:
+   tmp_audio=audio_path.with_suffix('.tmp.wav')
+   cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-ss',str(intro['source_start']),'-i',str(intro['source']),'-t',str(intro['duration']),'-vn','-ar','48000','-ac','2','-c:a','pcm_s16le',str(tmp_audio)]
+   subprocess.run(cmd,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),capture_output=True)
+   os.replace(tmp_audio,audio_path)
+  add('audio',str(audio_path),0,end,0)
+  log('CapCut intro: video + original audio on separate editable tracks')
   elapsed=float(intro['duration'])
  for p in parts:
   begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
   clips=p['clips']
   for i,s in enumerate(clips):
    start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round((clips[i+1]['start']+float(intro['duration']) if intro else clips[i+1]['start'])*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
+ for track in tracks.values(): track['segments'].sort(key=lambda seg: (seg['target_timerange']['start'],seg['id']))
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
  meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for _,p in seen)); meta['draft_materials'][0]['value']=entries
  project.update(id=uid(),main_timeline_id=tid,create_time=now,update_time=now); project['timelines'][0].update(id=tid,create_time=now,update_time=now); layout['dockItems'][0]['timelineIds']=[tid]; store['draft_virtual_store'][1]['value']=[{'child_id':e['id'],'parent_id':''} for e in entries]
