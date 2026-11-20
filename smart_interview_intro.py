@@ -54,12 +54,16 @@ def choose_intro(c, log):
     model = WhisperModel("base", device="cpu", compute_type="int8")
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
     candidates = []
+    fallback = []
     for path in videos:
         try:
             info = _probe(path)
             if not any(s.get("codec_type") == "audio" for s in info["streams"]):
                 log("Bỏ qua video không có tiếng: " + path.name)
                 continue
+            duration = float(info.get("format", {}).get("duration", 0) or 0)
+            if duration > 0.5:
+                fallback.append((str(path), duration))
             segments, _ = model.transcribe(str(path), vad_filter=True, beam_size=3)
             rows = list(segments)
             # Sliding windows over complete Whisper segments. No mid-sentence cut.
@@ -79,17 +83,27 @@ def choose_intro(c, log):
                     candidates.append((score, str(path), float(first.start), dur, phrase))
         except Exception as exc:
             log("Không phân tích được " + path.name + ": " + str(exc))
-    if not candidates:
-        raise ValueError("Không tìm thấy đoạn phỏng vấn có âm thanh hợp lệ")
-    candidates.sort(reverse=True)
-    best = candidates[0]
-    log("Top đoạn phỏng vấn (điểm khớp từ ngữ, chưa xác minh khuôn mặt):")
-    for score, path, start, dur, phrase in candidates[:3]:
-        log(f"  {Path(path).name} | {start:.1f}s | {dur:.1f}s | {score:.2f} | {phrase[:100]}")
-    if best[0] < 0.045:
-        raise ValueError("Chưa có đoạn phỏng vấn đủ khớp TXT. Hãy chọn tư liệu khác hoặc tắt intro.")
-    return {"source": best[1], "source_start": best[2],
-            "duration": best[3], "transcript": best[4], "score": best[0]}
+    if candidates:
+        candidates.sort(reverse=True)
+        best = candidates[0]
+        log("Top đoạn phỏng vấn (điểm khớp từ ngữ, chưa xác minh khuôn mặt):")
+        for score, path, start, dur, phrase in candidates[:3]:
+            log(f"  {Path(path).name} | {start:.1f}s | {dur:.1f}s | {score:.2f} | {phrase[:100]}")
+        if best[0] < 0.045:
+            log("CẢNH BÁO: Không có đoạn khớp nội dung. Dùng đoạn phỏng vấn dự phòng có lời nói.")
+        return {"source": best[1], "source_start": best[2],
+                "duration": best[3], "transcript": best[4], "score": best[0]}
+    if fallback:
+        # No transcribed passage; use a valid source with original sound.
+        # Keep the intro short and never exceed the configured 30-second cap.
+        path, duration = sorted(fallback, key=lambda item: item[1], reverse=True)[0]
+        seconds = min(max_seconds, 12.0, duration)
+        if seconds > 0.5:
+            log(f"CẢNH BÁO: Whisper không tìm thấy lời thoại. Dùng intro dự phòng {Path(path).name} ({seconds:.1f}s), giữ tiếng gốc.")
+            return {"source": path, "source_start": 0.0,
+                    "duration": seconds, "transcript": "", "score": 0.0}
+    log("CẢNH BÁO: Không có video phỏng vấn kèm âm thanh hợp lệ. Bỏ qua intro, tiếp tục xuất bình thường.")
+    return None
 
 def prepend_mp4(c, intro, log):
     """Prepend interview with original sound. Re-encode for reliable A/V sync."""
