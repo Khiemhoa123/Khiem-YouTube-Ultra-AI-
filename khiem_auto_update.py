@@ -32,7 +32,7 @@ def changed_files(checkout):
         dst = ROOT / src.name
         if src.name == "khiem_auto_update.py" or src.is_symlink():
             continue
-        if not dst.is_file() or dst.is_symlink():
+        if (not dst.is_file() and src.name != "smart_interview_intro.py") or dst.is_symlink():
             continue
         ast.parse(src.read_text(encoding="utf-8-sig"), filename=str(src))
         if src.read_bytes() != dst.read_bytes():
@@ -61,9 +61,11 @@ def update(log, install=False):
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup = BACKUPS / stamp
         backup.mkdir(parents=True)
-        manifest = {"revision": revision, "files": [d.name for _, d in changes]}
+        manifest = {"revision": revision, "files": [d.name for _, d in changes],
+                    "created": [d.name for _, d in changes if not d.exists()]}
         for _, dst in changes:
-            shutil.copy2(dst, backup / dst.name)
+            if dst.exists():
+                shutil.copy2(dst, backup / dst.name)
         (backup / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         replaced = []
         try:
@@ -74,7 +76,10 @@ def update(log, install=False):
                 replaced.append(dst)
         except Exception:
             for dst in replaced:
-                shutil.copy2(backup / dst.name, dst)
+                if (backup / dst.name).exists():
+                    shutil.copy2(backup / dst.name, dst)
+                elif dst.exists():
+                    dst.unlink()
             raise
         log("Update complete. Restart editor. Backup: " + str(backup))
 
@@ -85,14 +90,19 @@ def restore(log):
     if not folders:
         raise RuntimeError("No valid backup.")
     backup = folders[-1]
-    names = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))["files"]
+    manifest = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
+    names = manifest["files"]
+    created = set(manifest.get("created", []))
     if not all(isinstance(n, str) and Path(n).name == n and n.endswith(".py")
-               and (backup / n).is_file() for n in names):
+               and (n in created or (backup / n).is_file()) for n in names):
         raise RuntimeError("Invalid backup manifest.")
     if not messagebox.askyesno("Restore backup", "Close editor. Restore " + backup.name + "?"):
         return
     for name in names:
-        shutil.copy2(backup / name, ROOT / name)
+        if name in created:
+            (ROOT / name).unlink(missing_ok=True)
+        else:
+            shutil.copy2(backup / name, ROOT / name)
     log("Restored. Restart editor.")
 
 class UI:
@@ -114,7 +124,7 @@ class UI:
             btn.pack(side="left", padx=5)
             self.buttons.append(btn)
         self.log("App folder: " + str(ROOT))
-        self.log("Only existing .py files will be updated. Review changes first.")
+        self.log("Existing Python files and the SMART INTERVIEW INTRO module can be installed.")
 
     def log(self, line):
         self.root.after(0, lambda: (self.logbox.insert("end", str(line) + "\n"),
