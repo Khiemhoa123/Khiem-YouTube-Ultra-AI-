@@ -130,8 +130,16 @@ def content_adjustment(src, query, script, log):
 # ============================================================
 
 def plan(c, log):
-    voices = indexed(c['voice'], A)
-    scripts = indexed(c['txt'], {'.txt'})
+    shared = None
+    if c.get('project_folder'):
+        from auto_project_v11 import discover
+        shared = discover(c['project_folder'], c.get('interview_file'))
+        voices, scripts = shared['voice'], shared['txt']
+        log('AUTO PROJECT: %d voice, %d TXT, %d ảnh, %d video; không sao chép file.' %
+            (len(voices), len(scripts), len(shared['images']), len(shared['videos'])))
+    else:
+        voices = indexed(c['voice'], A)
+        scripts = indexed(c['txt'], {'.txt'})
     fps = int(c['fps'])
 
     # Stable selection for identical inputs, useful for repeatable CapCut edits.
@@ -203,15 +211,15 @@ def plan(c, log):
             ('image', I, c['images']),
             ('video', V, c['videos'])
         ]:
-            folders = [
+            folders = ([Path(c['project_folder'])] if shared is not None else [
                 x for x in Path(root).iterdir()
                 if x.is_dir() and number(x) == n
-            ]
+            ])
 
             pools[kind] = []
 
             for folder in folders:
-                for src in sorted(folder.rglob('*')):
+                for src in (shared[kind + 's'] if shared is not None else sorted(folder.rglob('*'))):
                     if (
                         not src.is_file()
                         or src.suffix.lower() not in ext
