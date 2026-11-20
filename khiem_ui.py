@@ -830,10 +830,51 @@ class KhiemYoutube:
 
         try:
             # Sử dụng thuật toán V6.8.
-            parts = engine.plan(
-                config,
-                logger
-            )
+            # Reuse a verified timeline when source files and editing settings
+            # have not changed. The export mode is deliberately excluded.
+            import hashlib
+            fingerprint_fields = {
+                key: value for key, value in config.items()
+                if key not in ("draft_root", "sample", "interview_folder",
+                               "interview_enabled", "interview_max_seconds")
+                and not key.startswith("_")
+            }
+            source_manifest = []
+            for field in ("voice", "txt", "images", "videos"):
+                folder = Path(str(config.get(field, "")))
+                if folder.is_dir():
+                    for item in sorted(folder.rglob("*")):
+                        if item.is_file():
+                            stat = item.stat()
+                            source_manifest.append((str(item.relative_to(folder)),
+                                                    field, stat.st_size, stat.st_mtime_ns))
+            fingerprint = hashlib.sha256(json.dumps(
+                [fingerprint_fields, source_manifest], ensure_ascii=False,
+                sort_keys=True, default=str
+            ).encode("utf-8")).hexdigest()
+            cache_path = Path(config["out"]) / (config["name"] + ".timeline_cache.json")
+            parts = None
+            if cache_path.is_file():
+                try:
+                    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                    if cached.get("fingerprint") == fingerprint:
+                        parts = cached.get("parts")
+                        if not isinstance(parts, list) or not parts:
+                            parts = None
+                        else:
+                            logger("TURBO CACHE: Sử dụng timeline đã phân tích, bỏ qua CLIP và Whisper.")
+                except (OSError, ValueError, TypeError):
+                    parts = None
+            if parts is None:
+                parts = engine.plan(config, logger)
+                try:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(json.dumps(
+                        {"fingerprint": fingerprint, "parts": parts},
+                        ensure_ascii=False
+                    ), encoding="utf-8")
+                except OSError as cache_error:
+                    logger("Không lưu được timeline cache: " + str(cache_error))
 
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
