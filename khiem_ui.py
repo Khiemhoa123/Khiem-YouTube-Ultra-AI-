@@ -7,6 +7,8 @@ import json
 import os
 import re
 import traceback
+import time
+from project_queue_v11 import ProjectQueue
 
 import app as engine
 
@@ -108,7 +110,12 @@ class KhiemYoutube:
 
         self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
         self.interview_enabled.trace_add("write", lambda *_: self.save_settings())
-        self.busy = False
+        self.queue = ProjectQueue(Path(__file__).resolve().parent / "project_queue_v11.json")
+        self.queue_running = False
+        self.active_job = None
+        self.queue_mode = False
+        self.queue_shutdown = tk.BooleanVar(value=False)
+        self.queue_shutdown_confirmed = False
         self.progress = tk.DoubleVar(value=0)
         self.buttons = []
 
@@ -330,6 +337,7 @@ class KhiemYoutube:
         self.build_project()
         self.build_editor()
         self.build_export()
+        self.build_queue()
 
     def heading(self, parent, title):
         ttk.Label(
@@ -692,6 +700,157 @@ class KhiemYoutube:
             pady=12
         )
 
+    def build_queue(self):
+        self.queue_tab = ttk.Frame(self.tabs, padding=12)
+        self.tabs.add(self.queue_tab, text="04  HÀNG ĐỢI")
+        self.heading(self.queue_tab, "Dự án chạy lần lượt, lỗi tự chuyển dự án sau")
+        top = ttk.Frame(self.queue_tab)
+        top.pack(fill="x", pady=5)
+        for label, mode in (("Thêm CapCut", "capcut"), ("Thêm MP4", "render")):
+            ttk.Button(top, text=label, command=lambda m=mode: self.queue_add(m)).pack(side="left", padx=4)
+        ttk.Button(top, text="CHẠY HÀNG ĐỢI", style="Accent.TButton",
+                   command=self.queue_start).pack(side="left", padx=4)
+        ttk.Button(top, text="Dừng sau dự án hiện tại",
+                   command=self.queue_stop).pack(side="left", padx=4)
+        self.queue_list = ttk.Treeview(self.queue_tab, columns=("name", "mode", "status", "time"),
+                                       show="headings", height=12)
+        for col, label, width in (("name", "Dự án", 250), ("mode", "Xuất", 90),
+                                  ("status", "Trạng thái", 160), ("time", "Thời gian", 120)):
+            self.queue_list.heading(col, text=label)
+            self.queue_list.column(col, width=width)
+        self.queue_list.pack(fill="both", expand=True, pady=8)
+        controls = ttk.Frame(self.queue_tab)
+        controls.pack(fill="x")
+        ttk.Button(controls, text="Chạy lại dự án lỗi",
+                   command=self.queue_retry).pack(side="left", padx=4)
+        ttk.Button(controls, text="Sửa dự án đã chọn",
+                   command=self.queue_edit).pack(side="left", padx=4)
+        ttk.Button(controls, text="Xóa dự án đã chọn",
+                   command=self.queue_delete).pack(side="left", padx=4)
+        ttk.Button(controls, text="Xem lỗi",
+                   command=self.queue_error).pack(side="left", padx=4)
+        ttk.Checkbutton(self.queue_tab, text="Tắt Windows khi hàng đợi hoàn tất (tùy chọn)",
+                        variable=self.queue_shutdown).pack(anchor="w", pady=10)
+        self.queue_summary = ttk.Label(self.queue_tab, text="")
+        self.queue_summary.pack(anchor="w")
+        self.queue_refresh()
+        self.root.after(1000, self.queue_tick)
+
+    def queue_refresh(self):
+        for item in self.queue_list.get_children():
+            self.queue_list.delete(item)
+        names = {"pending": "Đang chờ", "running": "Đang chạy",
+                 "success": "Hoàn thành", "failed": "LỖI",
+                 "interrupted": "Bị gián đoạn"}
+        for job in self.queue.jobs:
+            elapsed = job.get("elapsed", 0)
+            if job.get("status") == "running" and job.get("started"):
+                elapsed = time.time() - job["started"]
+            clock = f"{int(elapsed)//3600:02}:{int(elapsed)%3600//60:02}:{int(elapsed)%60:02}"
+            self.queue_list.insert("", "end", iid=job["id"],
+                values=(job["name"], job["mode"], names.get(job["status"], job["status"]), clock))
+        success = sum(j["status"] == "success" for j in self.queue.jobs)
+        failed = sum(j["status"] in ("failed", "interrupted") for j in self.queue.jobs)
+        pending = sum(j["status"] == "pending" for j in self.queue.jobs)
+        self.queue_summary.config(text=f"Tổng: {len(self.queue.jobs)} | Xong: {success} | Lỗi: {failed} | Chờ: {pending}")
+
+    def queue_tick(self):
+        self.queue_refresh()
+        self.root.after(1000, self.queue_tick)
+
+    def queue_selected(self):
+        selection = self.queue_list.selection()
+        return next((j for j in self.queue.jobs if selection and j["id"] == selection[0]), None)
+
+    def queue_add(self, mode):
+        config = self.get_config()
+        try:
+            self.validate(config)
+        except Exception as error:
+            messagebox.showerror("Dự án chưa hợp lệ", str(error))
+            return
+        if any(j["name"] == config["name"] and j["status"] in ("pending", "running")
+               for j in self.queue.jobs):
+            messagebox.showwarning("Trùng tên", "Dự án này đang chờ hoặc chạy.")
+            return
+        self.queue.add(config, mode)
+        self.queue_refresh()
+        self.tabs.select(self.queue_tab)
+
+    def queue_edit(self):
+        job = self.queue_selected()
+        if not job or job["status"] == "running":
+            return
+        for key, value in job["config"].items():
+            if key in self.vars:
+                self.vars[key].set(str(value))
+        for key, variable in (("gpu", self.gpu), ("ai", self.ai),
+                              ("align", self.align), ("interview_enabled", self.interview_enabled)):
+            variable.set(bool(job["config"].get(key, variable.get())))
+        job["status"] = "interrupted"
+        self.queue.save()
+        self.tabs.select(self.project_tab)
+        messagebox.showinfo("Chỉnh sửa", "Đã nạp cấu hình vào tab DỰ ÁN. Sau khi sửa, bấm Thêm CapCut hoặc Thêm MP4 để tạo lượt chạy mới.")
+
+    def queue_retry(self):
+        job = self.queue_selected()
+        if job and self.queue.retry(job):
+            self.queue_refresh()
+            if self.queue_running and not self.busy:
+                self.root.after(50, self.queue_next)
+
+    def queue_delete(self):
+        job = self.queue_selected()
+        if job and job["status"] != "running":
+            self.queue.jobs.remove(job)
+            self.queue.save()
+            self.queue_refresh()
+
+    def queue_error(self):
+        job = self.queue_selected()
+        if job:
+            messagebox.showinfo("Nhật ký dự án", job.get("error") or "Không có lỗi được ghi nhận.")
+
+    def queue_start(self):
+        if self.queue_running:
+            return
+        if self.busy:
+            messagebox.showwarning("Đang xử lý", "Hãy chờ tác vụ hiện tại kết thúc.")
+            return
+        if not self.queue.next_pending():
+            messagebox.showinfo("Hàng đợi", "Không có dự án đang chờ.")
+            return
+        self.queue_shutdown_confirmed = False
+        if self.queue_shutdown.get():
+            if not messagebox.askyesno("Xác nhận tắt Windows",
+                "Sau khi chạy hết hàng đợi, Windows sẽ tắt, kể cả khi có dự án lỗi. Bạn xác nhận?"):
+                return
+            self.queue_shutdown_confirmed = True
+        self.queue_running = True
+        self.queue_next()
+
+    def queue_stop(self):
+        self.queue_running = False
+        self.queue_shutdown_confirmed = False
+        self.log("Hàng đợi sẽ dừng sau dự án đang chạy.")
+
+    def queue_next(self):
+        if not self.queue_running or self.busy:
+            return
+        job = self.queue.next_pending()
+        if job is None:
+            self.queue_running = False
+            self.log("HÀNG ĐỢI HOÀN TẤT. Kiểm tra tab HÀNG ĐỢI để xem các dự án lỗi.")
+            if self.queue_shutdown.get() and self.queue_shutdown_confirmed:
+                self.queue_shutdown_confirmed = False
+                if messagebox.askyesno("Tắt máy", "Hàng đợi đã xong. Tắt Windows sau 60 giây?"):
+                    import subprocess
+                    subprocess.Popen(["shutdown", "/s", "/t", "60"])
+            return
+        self.active_job = job
+        self.queue.update(job, "running")
+        self.start(job["mode"], config_override=dict(job["config"]), from_queue=True)
+
     def log(self, message):
         def update():
             self.log_box.insert(
@@ -768,19 +927,21 @@ class KhiemYoutube:
         if not config["effects"]:
             config["effects"] = ["Tĩnh"]
 
-    def start(self, mode):
+    def start(self, mode, config_override=None, from_queue=False):
         if self.busy:
             return
 
-        config = self.get_config()
+        config = config_override if config_override is not None else self.get_config()
 
         try:
             self.validate(config)
         except Exception as error:
-            messagebox.showerror(
-                "Lỗi",
-                str(error)
-            )
+            if from_queue and self.active_job:
+                self.queue.update(self.active_job, "failed", str(error))
+                self.active_job = None
+                self.root.after(50, self.queue_next)
+            else:
+                messagebox.showerror("Lỗi", str(error))
             return
 
         self.busy = True
@@ -804,11 +965,13 @@ class KhiemYoutube:
 
         threading.Thread(
             target=self.worker,
-            args=(config, mode),
+            args=(config, mode, from_queue),
             daemon=True
         ).start()
 
-    def worker(self, config, mode):
+    def worker(self, config, mode, from_queue=False):
+        success = False
+        failure = ''
         def logger(message):
             self.log(message)
 
@@ -935,6 +1098,7 @@ class KhiemYoutube:
 
             self.set_progress(100)
             logger("HOÀN THÀNH.")
+            success = True
 
             if mode != "check":
                 try:
@@ -946,19 +1110,22 @@ class KhiemYoutube:
                     pass
 
         except Exception:
-            logger(
-                "LỖI:\n"
-                + traceback.format_exc()
-            )
+            failure = traceback.format_exc()
+            logger("LỖI:\\n" + failure)
 
         finally:
-            self.root.after(
-                0,
-                self.finish
-            )
+            self.root.after(0, lambda: self.finish(success, failure, from_queue))
 
-    def finish(self):
+    def finish(self, success=True, failure="", from_queue=False):
         self.busy = False
+        if from_queue and self.active_job:
+            self.queue.update(self.active_job, "success" if success else "failed", failure)
+            if not success:
+                self.log("Dự án lỗi: " + self.active_job["name"] + ". Đã ghi nhật ký, tiếp tục dự án kế.")
+            self.active_job = None
+            self.queue_refresh()
+            if self.queue_running:
+                self.root.after(100, self.queue_next)
 
         for button in self.buttons:
             button.configure(
