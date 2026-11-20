@@ -876,6 +876,9 @@ class KhiemYoutube:
                 except OSError as cache_error:
                     logger("Không lưu được timeline cache: " + str(cache_error))
 
+            from pre_export_qa_v11 import validate as validate_timeline
+            validate_timeline(parts, config, logger)
+
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
                 from smart_interview_intro import choose_intro
