@@ -106,6 +106,7 @@ class KhiemYoutube:
 
         self.configure_style()
         self.build_interface()
+        self.add_update_button()
 
         for var in self.vars.values():
             var.trace_add(
@@ -125,6 +126,27 @@ class KhiemYoutube:
         self.root.protocol(
             "WM_DELETE_WINDOW", self.close
         )
+
+    def add_update_button(self):
+        """Launch the separate updater, without touching editing logic."""
+        import subprocess
+        import sys
+        updater = Path(__file__).resolve().parent / "khiem_auto_update_v2.py"
+        def launch():
+            if self.busy:
+                messagebox.showwarning("Dang xu ly", "Hay cho render hoan tat.")
+                return
+            if not updater.is_file():
+                messagebox.showwarning("AUTO UPDATE", "Missing khiem_auto_update_v2.py")
+                return
+            try:
+                subprocess.Popen([sys.executable, str(updater)],
+                    cwd=str(updater.parent),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except OSError as exc:
+                messagebox.showerror("AUTO UPDATE", str(exc))
+        tk.Button(self.root, text="KIEM TRA CAP NHAT", command=launch,
+                  bg=COLORS["accent"], fg=COLORS["bg"]).pack(side="bottom", pady=5)
 
     def load_settings(self):
         try:
