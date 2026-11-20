@@ -24,6 +24,7 @@ COLORS = {
 }
 
 DEFAULTS = {
+    "project_folder": "",
     "voice": "",
     "interview_folder": "",
     "interview_max_seconds": "30",
@@ -160,6 +161,10 @@ class KhiemYoutube:
             for key, var in self.vars.items()
         }
 
+        if config.get("project_folder", "").strip():
+            folder = config["project_folder"].strip()
+            for key in ("voice", "txt", "images", "videos"):
+                config[key] = folder
         config.update({
             "interview_enabled": self.interview_enabled.get(),
             "gpu": self.gpu.get(),
@@ -428,6 +433,10 @@ class KhiemYoutube:
             "name",
             "Tên dự án"
         )
+
+        self.folder_field(self.project_tab, "project_folder", "THƯ MỤC CHUNG (tự nhận dạng)")
+        ttk.Label(self.project_tab, text="Có thư mục chung: tự ghép Voice/TXT theo số, AI dùng toàn bộ ảnh/video.",
+                  foreground=COLORS["muted"]).pack(anchor="w", pady=(0, 8))
 
         folders = [
             ("voice", "Thư mục Voice MP3"),
@@ -966,6 +975,9 @@ class KhiemYoutube:
             "out"
         ]
 
+        if config.get("project_folder"):
+            from auto_project_v11 import discover
+            discover(config["project_folder"], config.get("interview_file"))
         for key in required:
             if not Path(config[key]).is_dir():
                 raise ValueError(
