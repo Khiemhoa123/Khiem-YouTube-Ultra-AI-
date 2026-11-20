@@ -287,7 +287,7 @@ class KhiemYoutube:
 
         tk.Label(
             header,
-            text="V6.9 PRO  |  MODERN UI",
+            text="V10.1 ULTRA AI  |  SMART INTERVIEW",
             bg=COLORS["bg"],
             fg=COLORS["accent"],
             font=("Segoe UI", 10)
@@ -749,7 +749,7 @@ class KhiemYoutube:
         )
 
         self.log(
-            "=== KHIÊM YOUTUBE V6.9 PRO ==="
+            "=== KHIÊM YOUTUBE V10.1 ULTRA AI ==="
         )
         self.log(
             "Chế độ: " + mode
@@ -823,11 +823,13 @@ class KhiemYoutube:
             if mode == "capcut":
                 from capcut import export
 
-                export(
+                project_path = export(
                     config,
                     parts,
                     logger
                 )
+                if config.get("_interview_intro"):
+                    logger("Đã thêm interview đầu timeline CapCut: " + str(project_path))
 
             elif mode == "render":
                 engine.render(
