@@ -22,6 +22,9 @@ COLORS = {
 
 DEFAULTS = {
     "voice": "",
+    "interview_folder": "",
+    "interview_max_seconds": "30",
+    "interview_enabled": False,
     "txt": "",
     "images": "",
     "videos": "",
@@ -57,7 +60,7 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V6.9 PRO")
+        self.root.title("KHIEM YOUTUBE V10.1 | SMART INTERVIEW INTRO")
         self.root.geometry("1120x800")
         self.root.minsize(950, 650)
         self.root.configure(bg=COLORS["bg"])
@@ -71,7 +74,7 @@ class KhiemYoutube:
         saved = self.load_settings()
 
         for key, default in DEFAULTS.items():
-            if key in ("gpu", "ai", "align", "effects"):
+            if key in ("gpu", "ai", "align", "effects", "interview_enabled"):
                 continue
             self.vars[key] = tk.StringVar(
                 value=saved.get(key, default)
@@ -100,6 +103,8 @@ class KhiemYoutube:
             )
         }
 
+        self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
+        self.interview_enabled.trace_add("write", lambda *_: self.save_settings())
         self.busy = False
         self.progress = tk.DoubleVar(value=0)
         self.buttons = []
@@ -143,6 +148,7 @@ class KhiemYoutube:
         }
 
         config.update({
+            "interview_enabled": self.interview_enabled.get(),
             "gpu": self.gpu.get(),
             "ai": self.ai.get(),
             "align": self.align.get(),
@@ -411,6 +417,7 @@ class KhiemYoutube:
 
         folders = [
             ("voice", "Thư mục Voice MP3"),
+            ("interview_folder", "Thư mục video phỏng vấn"),
             ("txt", "Thư mục TXT"),
             ("images", "Thư mục ảnh"),
             ("videos", "Thư mục video"),
@@ -418,6 +425,9 @@ class KhiemYoutube:
             ("draft_root", "Thư mục CapCut"),
             ("sample", "Mẫu CapCut tùy chọn")
         ]
+
+        ttk.Checkbutton(self.project_tab, text="Bật SMART INTERVIEW INTRO (giữ tiếng gốc)", variable=self.interview_enabled).pack(anchor="w", pady=5)
+        self.field(self.project_tab, "interview_max_seconds", "Intro tối đa (giây)")
 
         for key, label in folders:
             self.folder_field(
@@ -679,6 +689,12 @@ class KhiemYoutube:
                     "Thư mục không hợp lệ: " + key
                 )
 
+        if config.get("interview_enabled"):
+            if not Path(config["interview_folder"]).is_dir():
+                raise ValueError("Chọn thư mục video phỏng vấn")
+            if not 1 <= float(config["interview_max_seconds"]) <= 30:
+                raise ValueError("Giới hạn intro phải từ 1 đến 30 giây")
+
         name = config["name"]
 
         if not name or re.search(
@@ -772,6 +788,11 @@ class KhiemYoutube:
                 logger
             )
 
+            config["_interview_intro"] = None
+            if mode in ("render", "capcut") and config.get("interview_enabled"):
+                from smart_interview_intro import choose_intro
+                config["_interview_intro"] = choose_intro(config, logger)
+
             timeline = (
                 Path(config["out"])
                 / (
@@ -810,6 +831,9 @@ class KhiemYoutube:
                     logger,
                     self.set_progress
                 )
+                if config.get("_interview_intro"):
+                    from smart_interview_intro import prepend_mp4
+                    prepend_mp4(config, config["_interview_intro"], logger)
 
             self.set_progress(100)
             logger("HOÀN THÀNH.")
