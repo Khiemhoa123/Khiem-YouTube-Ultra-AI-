@@ -134,12 +134,22 @@ def plan(c, log):
     scripts = indexed(c['txt'], {'.txt'})
     fps = int(c['fps'])
 
-    rng = random.Random()
+    # Stable selection for identical inputs, useful for repeatable CapCut edits.
+    import hashlib
+    seed = hashlib.sha256(json.dumps({
+        "name": c.get("name", ""),
+        "voices": [(n, str(p), p.stat().st_size, p.stat().st_mtime_ns)
+                   for n, p in sorted(voices.items())],
+        "speed": c.get("speed", "Smart"),
+        "video_goal": c.get("target_video_percent", 60)
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).digest()
+    rng = random.Random(int.from_bytes(seed[:8], "big"))
     used = set()
     used_images = []
     intervals = {}
     hashes = {}
     lens = {}
+    label_cache = {}
     parts = []
 
     elapsed = 0.0
@@ -324,20 +334,19 @@ def plan(c, log):
                     gap = r - l
                     start = rng.choice([l, r])
 
-                label = src.stem
-                side = src.with_suffix(
-                    src.suffix + '.txt'
-                )
-
-                if side.exists():
-                    label += ' ' + side.read_text(
-                        encoding='utf-8-sig',
-                        errors='replace'
-                    )
-
-                score = len(
-                    context & words(label)
-                )
+                # Read filename/sidecar once, not on every candidate scoring.
+                if src not in label_cache:
+                    label = src.stem
+                    side = src.with_suffix(src.suffix + '.txt')
+                    if side.exists():
+                        try:
+                            label += ' ' + side.read_text(
+                                encoding='utf-8-sig', errors='replace'
+                            )
+                        except OSError:
+                            pass
+                    label_cache[src] = words(label)
+                score = len(context & label_cache[src])
 
                 # Existing CLIP scoring
                 if ai:
@@ -476,7 +485,9 @@ def plan(c, log):
                     )
                 )
 
-                query = spoken or query
+                # Prefer the real spoken words when alignment is available.
+                # Add a small amount of script context for entity matching.
+                query = (spoken + ' ' + query[:180]).strip() if spoken else query
 
                 context = (
                     words(query)
