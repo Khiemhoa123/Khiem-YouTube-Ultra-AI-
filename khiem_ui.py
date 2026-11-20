@@ -791,7 +791,12 @@ class KhiemYoutube:
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
                 from smart_interview_intro import choose_intro
-                config["_interview_intro"] = choose_intro(config, logger)
+                try:
+                    config["_interview_intro"] = choose_intro(config, logger)
+                except Exception as intro_error:
+                    logger("CẢNH BÁO SMART INTERVIEW INTRO: " + str(intro_error))
+                    logger("Bỏ qua intro và tiếp tục xuất video bình thường.")
+                    config["_interview_intro"] = None
 
             timeline = (
                 Path(config["out"])
