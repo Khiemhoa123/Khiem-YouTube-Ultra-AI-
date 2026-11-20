@@ -36,6 +36,9 @@ DEFAULTS = {
     "sample": "",
     "name": "New Project",
     "speed": "Smart",
+    "smart_timeline": "1",
+    "min_video_percent": "40",
+    "target_video_percent": "60",
     "vn": "1",
     "an": "3",
     "videomode": "Cố định",
@@ -459,6 +462,9 @@ class KhiemYoutube:
                 "speed", "Chế độ AI",
                 ["Fast", "Smart", "Deep"]
             ),
+            ("smart_timeline", "AI SMART TIMELINE (1=bật, 0=tắt)", None),
+            ("min_video_percent", "Video tối thiểu (% thời lượng)", None),
+            ("target_video_percent", "Video mục tiêu (% thời lượng)", None),
             ("vn", "Số video mỗi chu kỳ", None),
             ("an", "Số ảnh mỗi chu kỳ", None),
             (
