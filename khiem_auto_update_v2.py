@@ -51,16 +51,13 @@ def update(log, install=False):
         log("GitHub revision: " + revision[:12])
         log("Changed Python files: " + str(len(changes)))
         for _, dst in changes:
-            log("  " + dst.name)
+            log(("  UPDATE " if dst.exists() else "  NEW    ") + dst.name)
         if not changes or not install:
             return
-        if not messagebox.askyesno("Install update",
-            "Close the main editor first.\nBack up and replace " +
-            str(len(changes)) + " Python files?"):
-            return
-        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Confirmation is handled on the Tk main thread before starting this worker.
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup = BACKUPS / stamp
-        backup.mkdir(parents=True)
+        backup.mkdir(parents=True, exist_ok=False)
         manifest = {"revision": revision, "entries": [{"name": d.name, "existed": d.exists()} for _, d in changes]}
         for _, dst in changes:
             if dst.exists():
@@ -95,13 +92,16 @@ def restore(log):
     if not all(isinstance(n, str) and Path(n).name == n and n.endswith(".py")
                and n not in ("khiem_auto_update.py", "khiem_auto_update_v2.py") for n in names):
         raise RuntimeError("Invalid backup manifest.")
-    if not messagebox.askyesno("Restore backup", "Close editor. Restore " + backup.name + "?"):
-        return
+    # Confirmation is handled on the Tk main thread before starting this worker.
+    # Preflight all files before modifying anything.
+    for entry in entries:
+        if not isinstance(entry.get("existed"), bool):
+            raise RuntimeError("Invalid manifest entry")
+        if entry["existed"] and not (backup / entry["name"]).is_file():
+            raise RuntimeError("Missing backup file: " + entry["name"])
     for entry in entries:
         name = entry["name"]
         if entry["existed"]:
-            if not (backup / name).is_file():
-                raise RuntimeError("Missing backup file: " + name)
             shutil.copy2(backup / name, ROOT / name)
         else:
             (ROOT / name).unlink(missing_ok=True)
@@ -112,25 +112,41 @@ class UI:
         self.root = tk.Tk()
         self.root.title("Khiem YouTube | AUTO UPDATE V2")
         self.root.geometry("780x450")
+        self.last_check = None
         self.logbox = scrolledtext.ScrolledText(self.root, font=("Consolas", 10))
         self.logbox.pack(fill="both", expand=True, padx=12, pady=12)
         bar = tk.Frame(self.root)
         bar.pack(pady=8)
         self.buttons = []
         for title, task in [
-            ("Check updates", lambda log: update(log, False)),
-            ("Install ALL changed/new", lambda log: update(log, True)),
-            ("Restore backup", restore),
+            ("Check updates", lambda: self.start(self.check)),
+            ("Install ALL changed/new", self.confirm_install),
+            ("Restore backup", self.confirm_restore),
         ]:
-            btn = tk.Button(bar, text=title, padx=10, command=lambda f=task: self.start(f))
+            btn = tk.Button(bar, text=title, padx=10, command=task)
             btn.pack(side="left", padx=5)
             self.buttons.append(btn)
         self.log("App folder: " + str(ROOT))
-        self.log("Only existing .py files will be updated. Review changes first.")
+        self.log("Only root-level .py files are eligible. Review all changes first.")
 
     def log(self, line):
         self.root.after(0, lambda: (self.logbox.insert("end", str(line) + "\n"),
                                     self.logbox.see("end")))
+
+    def check(self, log):
+        update(log, False)
+        self.last_check = True
+
+    def confirm_install(self):
+        if not self.last_check:
+            messagebox.showwarning("Check first", "Click Check updates before installing.")
+            return
+        if messagebox.askyesno("Install ALL", "Close the main editor first. This replaces ALL changed/new Python files. Have you reviewed the changes and made a separate backup?"):
+            self.start(lambda log: update(log, True))
+
+    def confirm_restore(self):
+        if messagebox.askyesno("Restore", "Close the main editor first. Restore the latest backup?"):
+            self.start(restore)
 
     def start(self, task):
         for b in self.buttons:
