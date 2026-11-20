@@ -224,7 +224,7 @@ class KhiemYoutube:
             "TEntry",
             fieldbackground=c["input"],
             foreground=c["text"],
-            padding=7
+            padding=4
         )
         style.configure(
             "TCombobox",
@@ -346,7 +346,7 @@ class KhiemYoutube:
         options=None
     ):
         row = ttk.Frame(parent)
-        row.pack(fill="x", pady=5)
+        row.pack(fill="x", pady=2)
 
         ttk.Label(
             row,
@@ -377,7 +377,7 @@ class KhiemYoutube:
         self, parent, key, label
     ):
         row = ttk.Frame(parent)
-        row.pack(fill="x", pady=6)
+        row.pack(fill="x", pady=3)
 
         ttk.Label(
             row,
@@ -452,8 +452,49 @@ class KhiemYoutube:
         )
 
     def build_editor(self):
+        # Scrollable editor: works on smaller displays and with mouse wheel.
+        canvas = tk.Canvas(self.editor_tab, bg=COLORS["panel"],
+                           highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(self.editor_tab, orient="vertical",
+                                  command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        editor_body = ttk.Frame(canvas, padding=(12, 8))
+        window_id = canvas.create_window((0, 0), window=editor_body, anchor="nw")
+        editor_body.bind("<Configure>",
+                         lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda event: canvas.itemconfigure(window_id, width=event.width))
+
+        def wheel(event):
+            if self.tabs.select() == str(self.editor_tab):
+                canvas.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
+
+        def wheel_linux_up(event):
+            if self.tabs.select() == str(self.editor_tab):
+                canvas.yview_scroll(-1, "units")
+
+        def wheel_linux_down(event):
+            if self.tabs.select() == str(self.editor_tab):
+                canvas.yview_scroll(1, "units")
+
+        def enable_wheel(event):
+            self.root.bind_all("<MouseWheel>", wheel)
+            self.root.bind_all("<Button-4>", wheel_linux_up)
+            self.root.bind_all("<Button-5>", wheel_linux_down)
+
+        def disable_wheel(event):
+            self.root.unbind_all("<MouseWheel>")
+            self.root.unbind_all("<Button-4>")
+            self.root.unbind_all("<Button-5>")
+
+        canvas.bind("<Enter>", enable_wheel)
+        canvas.bind("<Leave>", disable_wheel)
+        editor_body.bind("<Enter>", enable_wheel)
+
         self.heading(
-            self.editor_tab,
+            editor_body,
             "Cài đặt biên tập"
         )
 
@@ -518,14 +559,14 @@ class KhiemYoutube:
 
         for key, label, options in fields:
             self.field(
-                self.editor_tab,
+                editor_body,
                 key,
                 label,
                 options
             )
 
         options_frame = ttk.Frame(
-            self.editor_tab
+            editor_body
         )
         options_frame.pack(
             fill="x",
@@ -547,7 +588,7 @@ class KhiemYoutube:
             )
 
         effect_frame = ttk.Frame(
-            self.editor_tab
+            editor_body
         )
         effect_frame.pack(
             fill="x",
