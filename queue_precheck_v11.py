@@ -22,10 +22,20 @@ def inspect(config, mode, other_jobs=()):
                          ("videos", "Video"), ("out", "Đầu ra")):
         if not Path(str(config.get(field) or "")).is_dir():
             errors.append("Thiếu thư mục " + label)
-    voice = _files(config.get("voice"), AUDIO)
-    txt = _files(config.get("txt"), {".txt"})
-    images = _files(config.get("images"), IMAGES)
-    videos = _files(config.get("videos"), MEDIA)
+    if config.get("project_folder"):
+        try:
+            from auto_project_v11 import discover
+            found = discover(config["project_folder"], config.get("interview_file"))
+            voice, txt = list(found["voice"].values()), list(found["txt"].values())
+            images, videos = found["images"], found["videos"]
+        except (ValueError, OSError) as exc:
+            errors.append(str(exc))
+            voice, txt, images, videos = [], [], [], []
+    else:
+        voice = _files(config.get("voice"), AUDIO)
+        txt = _files(config.get("txt"), {".txt"})
+        images = _files(config.get("images"), IMAGES)
+        videos = _files(config.get("videos"), MEDIA)
     if not voice: errors.append("Không có file Voice hợp lệ")
     if not txt: errors.append("Không có file TXT hợp lệ")
     if not images and not videos: errors.append("Không có ảnh hoặc video nguồn")
