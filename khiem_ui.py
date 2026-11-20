@@ -21,6 +21,7 @@ COLORS = {
 }
 
 DEFAULTS = {
+    "interview_folder": "",
     "voice": "",
     "txt": "",
     "images": "",
@@ -100,6 +101,7 @@ class KhiemYoutube:
             )
         }
 
+        self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
         self.busy = False
         self.progress = tk.DoubleVar(value=0)
         self.buttons = []
@@ -114,7 +116,7 @@ class KhiemYoutube:
             )
 
         for var in [
-            self.gpu, self.ai, self.align,
+            self.gpu, self.ai, self.align, self.interview_enabled,
             *self.effects.values()
         ]:
             var.trace_add(
@@ -143,6 +145,7 @@ class KhiemYoutube:
         }
 
         config.update({
+            "interview_enabled": self.interview_enabled.get(),
             "gpu": self.gpu.get(),
             "ai": self.ai.get(),
             "align": self.align.get(),
@@ -410,6 +413,7 @@ class KhiemYoutube:
         )
 
         folders = [
+            ("interview_folder", "Thư mục video phỏng vấn"),
             ("voice", "Thư mục Voice MP3"),
             ("txt", "Thư mục TXT"),
             ("images", "Thư mục ảnh"),
