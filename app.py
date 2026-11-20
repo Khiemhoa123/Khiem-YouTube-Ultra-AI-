@@ -510,10 +510,18 @@ def plan(c, log):
 
                 videos = [o for o in options if o[0] == 'video']
                 need_video = video_frames < min_video * (pos + max(o[1] for o in options))
-                if need_video and videos:
-                    chosen = max(videos, key=option_score)
+                best_image = max((o for o in options if o[0] == 'image'),
+                                 key=option_score, default=None)
+                best_video = max(videos, key=option_score, default=None)
+                # Do not force a clearly unrelated video merely to meet quota.
+                video_relevant = best_video is not None and (
+                    best_image is None or best_video[2][0] >= best_image[2][0] - 0.85
+                )
+                if need_video and video_relevant:
+                    chosen = best_video
                 else:
-                    chosen = max(options, key=option_score)
+                    eligible = [o for o in options if o[0] != 'video' or video_relevant]
+                    chosen = max(eligible or options, key=option_score)
                 kind, nf, selected = chosen
                 if need_video and not videos and not warned_shortage:
                     log(f'Phần {n}: thiếu video phù hợp, tiếp tục với ảnh.')
