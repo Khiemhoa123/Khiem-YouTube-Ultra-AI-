@@ -35,8 +35,10 @@ class AutoProjectTests(unittest.TestCase):
             root = Path(tmp)
             for name in ("01 a.mp3", "01 b.wav", "01 a.txt", "image.jpg"):
                 (root / name).write_bytes(b"x")
-            with self.assertRaisesRegex(ValueError, "Trùng số"):
-                discover(root)
+            found = discover(root)
+            self.assertEqual(len(found["voice"]), 1)
+            self.assertEqual(len(found["duplicates"]), 1)
+            self.assertEqual(len(found["duplicates"][0]["ignored"]), 1)
 
 if __name__ == "__main__":
     unittest.main()
