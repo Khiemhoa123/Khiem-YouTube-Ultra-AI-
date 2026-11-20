@@ -1,9 +1,9 @@
-# SMART INTERVIEW INTRO, first release
+# SMART INTERVIEW INTRO, integrated preview
 
-Run: `python smart_interview_intro.py`.
+The main `khiem_ui.py` now has an opt-in interview folder and checkbox. When enabled for MP4 or CapCut export, it scans interview videos with faster-whisper, compares speech against the earliest numbered opening TXT, exports the highest ranked candidate with original interview audio, prepends it to the ordinary parts list, and offsets later scene timestamps. Interview duration never exceeds 30 seconds. Existing app.py and capcut.py were not overwritten.
 
-Requires `ffmpeg`, `ffprobe` on PATH and `pip install faster-whisper`. First Whisper model download requires internet; later runs can use cached model. Choose interview video folder and opening TXT. Click Analyze, inspect ranked candidates and export a selected MP4. Video and original interview audio are preserved. Hard maximum 30 seconds. No input videos are modified.
+Install dependencies on Windows: `pip install faster-whisper`; FFmpeg and FFprobe must be available on PATH. First Whisper model use may download a model.
 
-**Current limitations:** English transcription only, CPU inference can take time; uses lexical similarity to opening TXT, not deep semantic understanding. Does not yet read AI voice MP3, confirm celebrity identity, crop logos, concatenate with AI narration, or insert into CapCut project. Human review is essential. This is a separate tool, not an integrated feature of the main app. Do not present voiceover as authentic celebrity speech. Only use footage with appropriate rights.
+**Limitations:** This is an unverified integrated preview. Ranking uses transcript word overlap, not identity recognition or deep semantic matching. The AI voice MP3 is not used in selection. No automatic logo cropping or face-aware framing. The MP4 and CapCut export paths have not been tested with an actual interview video; CapCut audio handling for video-backed audio requires validation. Existing voice narration is retained after the intro. If no sufficiently relevant speech is found, the export fails safely instead of silently choosing a random interview.
 
-Do not merge until you are ready to try the new standalone feature. Existing app.py, capcut.py and khiem_ui.py remain unchanged in this PR.
+Do not claim interview footage is licensed or that synthesized narration is authentic celebrity speech. Confirm speaker identity, editorial context and rights before publishing.
