@@ -9,6 +9,7 @@ import re
 import traceback
 import time
 from project_queue_v11 import ProjectQueue
+from queue_precheck_v11 import inspect as inspect_project
 
 import app as engine
 
@@ -115,6 +116,7 @@ class KhiemYoutube:
         self.queue_running = False
         self.active_job = None
         self.queue_mode = False
+        self.editing_job_id = None
         self.queue_shutdown = tk.BooleanVar(value=False)
         self.queue_shutdown_confirmed = False
         self.progress = tk.DoubleVar(value=0)
@@ -709,6 +711,7 @@ class KhiemYoutube:
         top.pack(fill="x", pady=5)
         for label, mode in (("Thêm CapCut", "capcut"), ("Thêm MP4", "render")):
             ttk.Button(top, text=label, command=lambda m=mode: self.queue_add(m)).pack(side="left", padx=4)
+        ttk.Button(top, text="KIỂM TRA TẤT CẢ", command=self.queue_precheck_all).pack(side="left", padx=4)
         ttk.Button(top, text="CHẠY HÀNG ĐỢI", style="Accent.TButton",
                    command=self.queue_start).pack(side="left", padx=4)
         ttk.Button(top, text="Dừng sau dự án hiện tại",
@@ -720,6 +723,15 @@ class KhiemYoutube:
             self.queue_list.heading(col, text=label)
             self.queue_list.column(col, width=width)
         self.queue_list.pack(fill="both", expand=True, pady=8)
+        self.queue_list.bind("<ButtonRelease-1>", self.queue_click)
+        self.queue_list.bind("<Button-3>", self.queue_click)
+        self.queue_menu = tk.Menu(self.root, tearoff=0)
+        for label, action in (("Sửa dự án", self.queue_edit),
+                              ("Xóa dự án", self.queue_delete),
+                              ("Kiểm tra dự án", self.queue_check_selected),
+                              ("Chạy lại", self.queue_retry),
+                              ("Xem lỗi", self.queue_error)):
+            self.queue_menu.add_command(label=label, command=action)
         controls = ttk.Frame(self.queue_tab)
         controls.pack(fill="x")
         ttk.Button(controls, text="Chạy lại dự án lỗi",
@@ -738,11 +750,12 @@ class KhiemYoutube:
         self.root.after(1000, self.queue_tick)
 
     def queue_refresh(self):
+        selected = self.queue_list.selection()
         for item in self.queue_list.get_children():
             self.queue_list.delete(item)
         names = {"pending": "Đang chờ", "running": "Đang chạy",
                  "success": "Hoàn thành", "failed": "LỖI",
-                 "interrupted": "Bị gián đoạn"}
+                 "interrupted": "Bị gián đoạn", "ready": "ĐẠT", "warning": "CẢNH BÁO", "error": "LỖI KIỂM TRA"}
         for job in self.queue.jobs:
             elapsed = job.get("elapsed", 0)
             if job.get("status") == "running" and job.get("started"):
@@ -750,9 +763,11 @@ class KhiemYoutube:
             clock = f"{int(elapsed)//3600:02}:{int(elapsed)%3600//60:02}:{int(elapsed)%60:02}"
             self.queue_list.insert("", "end", iid=job["id"],
                 values=(job["name"], job["mode"], names.get(job["status"], job["status"]), clock))
+        for item in selected:
+            if self.queue_list.exists(item): self.queue_list.selection_add(item)
         success = sum(j["status"] == "success" for j in self.queue.jobs)
         failed = sum(j["status"] in ("failed", "interrupted") for j in self.queue.jobs)
-        pending = sum(j["status"] == "pending" for j in self.queue.jobs)
+        pending = sum(j["status"] in ("pending", "ready", "warning") for j in self.queue.jobs)
         self.queue_summary.config(text=f"Tổng: {len(self.queue.jobs)} | Xong: {success} | Lỗi: {failed} | Chờ: {pending}")
 
     def queue_tick(self):
@@ -762,6 +777,48 @@ class KhiemYoutube:
     def queue_selected(self):
         selection = self.queue_list.selection()
         return next((j for j in self.queue.jobs if selection and j["id"] == selection[0]), None)
+
+    def queue_click(self, event):
+        item = self.queue_list.identify_row(event.y)
+        if item:
+            self.queue_list.selection_set(item)
+            self.queue_list.focus(item)
+            if event.num == 3 or self.queue_list.identify_column(event.x) == "#1":
+                self.queue_menu.tk_popup(event.x_root, event.y_root)
+
+    def queue_check_job(self, job):
+        config = dict(job["config"])
+        config["_queue_id"] = job["id"]
+        result = inspect_project(config, job["mode"], self.queue.jobs)
+        job["precheck"] = result
+        if job["status"] not in ("running", "success", "failed"):
+            job["status"] = result["status"]
+        self.queue.save()
+        return result
+
+    def queue_check_selected(self):
+        job = self.queue_selected()
+        if job and job["status"] != "running":
+            self.queue_check_job(job)
+            self.queue_refresh()
+            self.queue_error()
+
+    def queue_precheck_all(self):
+        if self.busy:
+            messagebox.showwarning("Đang chạy", "Đợi dự án hiện tại kết thúc.")
+            return
+        self.queue_check_all()
+        counts = {key: sum(j["status"] == key for j in self.queue.jobs)
+                  for key in ("ready", "warning", "error")}
+        messagebox.showinfo("KIỂM TRA TẤT CẢ",
+            "ĐẠT: {ready} | CẢNH BÁO: {warning} | LỖI: {error}\\n"
+            "Dự án lỗi bị bỏ qua. Đây là kiểm tra nhanh, chưa render.".format(**counts))
+
+    def queue_check_all(self):
+        for job in self.queue.jobs:
+            if job["status"] in ("pending", "ready", "warning", "error"):
+                self.queue_check_job(job)
+        self.queue_refresh()
 
     def queue_add(self, mode):
         config = self.get_config()
@@ -774,7 +831,17 @@ class KhiemYoutube:
                for j in self.queue.jobs):
             messagebox.showwarning("Trùng tên", "Dự án này đang chờ hoặc chạy.")
             return
-        self.queue.add(config, mode)
+        if self.editing_job_id:
+            job = next((j for j in self.queue.jobs if j["id"] == self.editing_job_id), None)
+            if job and job["status"] != "running":
+                job.update(config=dict(config), name=config["name"], mode=mode,
+                           status="pending", error="", precheck=None)
+                self.queue.save()
+            else:
+                self.queue.add(config, mode)
+            self.editing_job_id = None
+        else:
+            self.queue.add(config, mode)
         self.queue_refresh()
         self.tabs.select(self.queue_tab)
 
@@ -788,8 +855,11 @@ class KhiemYoutube:
         for key, variable in (("gpu", self.gpu), ("ai", self.ai),
                               ("align", self.align), ("interview_enabled", self.interview_enabled)):
             variable.set(bool(job["config"].get(key, variable.get())))
+        for key, variable in self.effects.items():
+            variable.set(key in job["config"].get("effects", []))
+        self.editing_job_id = job["id"]
         self.tabs.select(self.project_tab)
-        messagebox.showinfo("Chỉnh sửa", "Đã nạp cấu hình vào tab DỰ ÁN. Sau khi sửa, bấm Thêm CapCut hoặc Thêm MP4 để tạo lượt chạy mới. Bạn có thể xóa lượt cũ trong hàng đợi.")
+        messagebox.showinfo("Chỉnh sửa", "Sửa cấu hình rồi vào HÀNG ĐỢI bấm Thêm CapCut hoặc Thêm MP4 để lưu vào dự án cũ.")
 
     def queue_retry(self):
         job = self.queue_selected()
@@ -800,7 +870,8 @@ class KhiemYoutube:
 
     def queue_delete(self):
         job = self.queue_selected()
-        if job and job["status"] != "running":
+        if job and job["status"] != "running" and messagebox.askyesno(
+                "Xóa dự án", "Xóa " + job["name"] + " khỏi hàng đợi? Không xóa file nguồn."):
             self.queue.jobs.remove(job)
             self.queue.save()
             self.queue_refresh()
@@ -808,7 +879,10 @@ class KhiemYoutube:
     def queue_error(self):
         job = self.queue_selected()
         if job:
-            messagebox.showinfo("Nhật ký dự án", job.get("error") or "Không có lỗi được ghi nhận.")
+            check = job.get("precheck") or {}
+            messages = check.get("errors", []) + check.get("warnings", [])
+            messagebox.showinfo("Nhật ký dự án", (job.get("error") or "") +
+                ("\\n".join(messages) if messages else "\\nKhông có lỗi được ghi nhận."))
 
     def queue_start(self):
         if self.queue_running:
@@ -816,8 +890,9 @@ class KhiemYoutube:
         if self.busy:
             messagebox.showwarning("Đang xử lý", "Hãy chờ tác vụ hiện tại kết thúc.")
             return
-        if not self.queue.next_pending():
-            messagebox.showinfo("Hàng đợi", "Không có dự án đang chờ.")
+        self.queue_check_all()
+        if not any(j["status"] in ("ready", "warning") for j in self.queue.jobs):
+            messagebox.showinfo("Hàng đợi", "Không có dự án đạt kiểm tra để chạy.")
             return
         self.queue_shutdown_confirmed = False
         if self.queue_shutdown.get():
@@ -836,7 +911,7 @@ class KhiemYoutube:
     def queue_next(self):
         if not self.queue_running or self.busy:
             return
-        job = self.queue.next_pending()
+        job = next((j for j in self.queue.jobs if j["status"] in ("ready", "warning")), None)
         if job is None:
             self.queue_running = False
             self.log("HÀNG ĐỢI HOÀN TẤT. Kiểm tra tab HÀNG ĐỢI để xem các dự án lỗi.")
@@ -844,6 +919,10 @@ class KhiemYoutube:
                 self.queue_shutdown_confirmed = False
                 import subprocess
                 subprocess.Popen(["shutdown", "/s", "/t", "60"])
+            return
+        if self.queue_check_job(job)["status"] == "error":
+            self.log("Bỏ qua dự án lỗi đầu vào: " + job["name"])
+            self.root.after(100, self.queue_next)
             return
         self.active_job = job
         self.queue.update(job, "running")
