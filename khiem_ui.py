@@ -74,7 +74,7 @@ class KhiemYoutube:
         saved = self.load_settings()
 
         for key, default in DEFAULTS.items():
-            if key in ("gpu", "ai", "align", "effects"):
+            if key in ("gpu", "ai", "align", "effects", "interview_enabled"):
                 continue
             self.vars[key] = tk.StringVar(
                 value=saved.get(key, default)
@@ -788,8 +788,10 @@ class KhiemYoutube:
                 logger
             )
 
-            from smart_interview_intro import choose_intro
-            config["_interview_intro"] = choose_intro(config, logger)
+            config["_interview_intro"] = None
+            if mode in ("render", "capcut") and config.get("interview_enabled"):
+                from smart_interview_intro import choose_intro
+                config["_interview_intro"] = choose_intro(config, logger)
 
             timeline = (
                 Path(config["out"])
