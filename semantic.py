@@ -54,14 +54,28 @@ class Semantic:
    if v is not None:values.append(float((v*self.texts[query]).sum()))
   return sum(values)/len(values) if values else -1
  def transcribe(self,path):
+  # Cache complete word-level transcripts; unchanged audio skips Whisper.
+  p=Path(path).resolve()
+  st=p.stat()
+  key=json.dumps(['whisper-base-words-v1',str(p),st.st_size,st.st_mtime_ns])
+  self.db.execute('CREATE TABLE IF NOT EXISTS transcripts (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
+  hit=self.db.execute('SELECT v FROM transcripts WHERE k=?',(key,)).fetchone()
+  if hit:
+   try:
+    return [tuple(item) for item in json.loads(hit[0])]
+   except (ValueError,TypeError):
+    pass
   from faster_whisper import WhisperModel
   if not hasattr(self,'whisper'):
    self.whisper=WhisperModel(str(model_path('whisper')),device='cpu',compute_type='int8',local_files_only=True)
   import numpy as np
-  raw=subprocess.check_output(['ffmpeg','-v','error','-i',str(path),'-vn','-ac','1','-ar','16000','-f','f32le','-'])
+  raw=subprocess.check_output(['ffmpeg','-v','error','-i',str(p),'-vn','-ac','1','-ar','16000','-f','f32le','-'])
   audio=np.frombuffer(raw,dtype='<f4').copy()
   seg,_=self.whisper.transcribe(audio,beam_size=1,word_timestamps=True)
-  return [(w.start,w.end,w.word) for s in seg for w in (s.words or [])]
+  result=[(w.start,w.end,w.word) for s in seg for w in (s.words or [])]
+  self.db.execute('INSERT OR REPLACE INTO transcripts(k,v) VALUES (?,?)',(key,json.dumps(result)))
+  self.db.commit()
+  return result
 
 # KHIEM_V71_SMART_RANKING
 from smart_v71 import install_smart_ranking
