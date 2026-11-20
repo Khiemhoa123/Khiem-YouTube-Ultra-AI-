@@ -78,7 +78,7 @@ def export(c,parts,log):
   begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
   clips=p['clips']
   for i,s in enumerate(clips):
-   start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round(clips[i+1]['start']*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
+   start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round((clips[i+1]['start']+float(intro['duration']) if intro else clips[i+1]['start'])*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
  meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for _,p in seen)); meta['draft_materials'][0]['value']=entries
  project.update(id=uid(),main_timeline_id=tid,create_time=now,update_time=now); project['timelines'][0].update(id=tid,create_time=now,update_time=now); layout['dockItems'][0]['timelineIds']=[tid]; store['draft_virtual_store'][1]['value']=[{'child_id':e['id'],'parent_id':''} for e in entries]
