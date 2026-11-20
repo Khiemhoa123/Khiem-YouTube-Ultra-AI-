@@ -76,11 +76,14 @@ def update(log, install=False, selected=None, expected_revision=None):
         try:
             for src, dst in changes:
                 staged = dst.with_name(dst.name + ".khiem_new")
-                shutil.copy2(src, staged)
-                os.replace(staged, dst)
+                try:
+                    shutil.copy2(src, staged)
+                    os.replace(staged, dst)
+                finally:
+                    staged.unlink(missing_ok=True)
                 replaced.append(dst)
         except Exception:
-            for dst in replaced:
+            for dst in reversed(replaced):
                 if (backup / dst.name).exists():
                     shutil.copy2(backup / dst.name, dst)
                 else:
@@ -166,7 +169,7 @@ class UI:
         if not selected:
             messagebox.showwarning("Select files", "Select at least one reviewed file.")
             return
-        if messagebox.askyesno("Install selected", "Close the main editor first. Back up and replace ONLY:\\n" + "\\n".join(selected) + "\\nProceed?"):
+        if messagebox.askyesno("Install selected", "Close the main editor first. Back up and replace ONLY:\n" + "\n".join(selected) + "\nProceed?"):
             self.start(lambda log: update(log, True, selected, self.last_check))
 
     def confirm_restore(self):
