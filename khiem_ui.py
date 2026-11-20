@@ -110,6 +110,7 @@ class KhiemYoutube:
 
         self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
         self.interview_enabled.trace_add("write", lambda *_: self.save_settings())
+        self.busy = False
         self.queue = ProjectQueue(Path(__file__).resolve().parent / "project_queue_v11.json")
         self.queue_running = False
         self.active_job = None
@@ -787,10 +788,8 @@ class KhiemYoutube:
         for key, variable in (("gpu", self.gpu), ("ai", self.ai),
                               ("align", self.align), ("interview_enabled", self.interview_enabled)):
             variable.set(bool(job["config"].get(key, variable.get())))
-        job["status"] = "interrupted"
-        self.queue.save()
         self.tabs.select(self.project_tab)
-        messagebox.showinfo("Chỉnh sửa", "Đã nạp cấu hình vào tab DỰ ÁN. Sau khi sửa, bấm Thêm CapCut hoặc Thêm MP4 để tạo lượt chạy mới.")
+        messagebox.showinfo("Chỉnh sửa", "Đã nạp cấu hình vào tab DỰ ÁN. Sau khi sửa, bấm Thêm CapCut hoặc Thêm MP4 để tạo lượt chạy mới. Bạn có thể xóa lượt cũ trong hàng đợi.")
 
     def queue_retry(self):
         job = self.queue_selected()
@@ -843,9 +842,8 @@ class KhiemYoutube:
             self.log("HÀNG ĐỢI HOÀN TẤT. Kiểm tra tab HÀNG ĐỢI để xem các dự án lỗi.")
             if self.queue_shutdown.get() and self.queue_shutdown_confirmed:
                 self.queue_shutdown_confirmed = False
-                if messagebox.askyesno("Tắt máy", "Hàng đợi đã xong. Tắt Windows sau 60 giây?"):
-                    import subprocess
-                    subprocess.Popen(["shutdown", "/s", "/t", "60"])
+                import subprocess
+                subprocess.Popen(["shutdown", "/s", "/t", "60"])
             return
         self.active_job = job
         self.queue.update(job, "running")
