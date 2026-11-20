@@ -63,9 +63,9 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V10.1 | SMART INTERVIEW INTRO")
-        self.root.geometry("1120x800")
-        self.root.minsize(950, 650)
+        self.root.title("KHIEM YOUTUBE V11 | SMART AI STUDIO")
+        self.root.geometry("1120x760")
+        self.root.minsize(900, 600)
         self.root.configure(bg=COLORS["bg"])
 
         self.settings_file = (
@@ -346,12 +346,12 @@ class KhiemYoutube:
         options=None
     ):
         row = ttk.Frame(parent)
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=1)
 
         ttk.Label(
             row,
             text=label,
-            width=25
+            width=31
         ).pack(side="left")
 
         if options is None:
