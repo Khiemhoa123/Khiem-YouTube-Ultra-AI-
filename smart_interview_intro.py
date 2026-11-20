@@ -46,12 +46,13 @@ def choose_intro(c, log):
         raise ValueError("Thư mục phỏng vấn không có video")
     script = _script_text(c["txt"])
     if not script.strip():
-        raise ValueError("Không đọc được TXT mở đầu")
+        log("Không đọc được TXT mở đầu; ưu tiên đoạn phỏng vấn có tiếng.")
+    model = None
     try:
         from faster_whisper import WhisperModel
-    except ImportError as exc:
-        raise RuntimeError("Cài faster-whisper: py -m pip install faster-whisper") from exc
-    model = WhisperModel("base", device="cpu", compute_type="int8")
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+    except Exception as exc:
+        log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
     candidates = []
     fallback = []
@@ -64,6 +65,8 @@ def choose_intro(c, log):
             duration = float(info.get("format", {}).get("duration", 0) or 0)
             if duration > 0.5:
                 fallback.append((str(path), duration))
+            if model is None:
+                continue
             segments, _ = model.transcribe(str(path), vad_filter=True, beam_size=3)
             rows = list(segments)
             # Sliding windows over complete Whisper segments. No mid-sentence cut.
