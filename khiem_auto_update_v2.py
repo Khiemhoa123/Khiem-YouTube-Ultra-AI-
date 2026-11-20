@@ -39,7 +39,7 @@ def changed_files(checkout):
             result.append((src, dst))
     return result
 
-def update(log, install=False):
+def update(log, install=False, selected=None, expected_revision=None):
     if not shutil.which("git"):
         raise RuntimeError("Install Git for Windows first: https://git-scm.com/downloads/win")
     with tempfile.TemporaryDirectory(prefix="khiem_update_") as temp:
@@ -48,12 +48,21 @@ def update(log, install=False):
         git("clone", "--quiet", "--depth", "1", "--branch", "main", REPO, str(checkout))
         revision = git("rev-parse", "HEAD", cwd=checkout)
         changes = changed_files(checkout)
+        if install:
+            if expected_revision != revision:
+                raise RuntimeError("GitHub revision changed. Run Check updates again.")
+            if not selected:
+                raise RuntimeError("No files selected.")
+            names = {dst.name for _, dst in changes}
+            if not set(selected).issubset(names):
+                raise RuntimeError("Files changed since check. Check again.")
+            changes = [(src, dst) for src, dst in changes if dst.name in selected]
         log("GitHub revision: " + revision[:12])
         log("Changed Python files: " + str(len(changes)))
         for _, dst in changes:
             log(("  UPDATE " if dst.exists() else "  NEW    ") + dst.name)
         if not changes or not install:
-            return
+            return revision, [(dst.name, dst.exists()) for _, dst in changes]
         # Confirmation is handled on the Tk main thread before starting this worker.
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup = BACKUPS / stamp
@@ -78,6 +87,7 @@ def update(log, install=False):
                     dst.unlink(missing_ok=True)
             raise
         log("Update complete. Restart editor. Backup: " + str(backup))
+        return revision, [(dst.name, dst.exists()) for _, dst in changes]
 
 def restore(log):
     if not BACKUPS.is_dir():
@@ -113,14 +123,18 @@ class UI:
         self.root.title("Khiem YouTube | AUTO UPDATE V2")
         self.root.geometry("780x450")
         self.last_check = None
+        self.available = []
         self.logbox = scrolledtext.ScrolledText(self.root, font=("Consolas", 10))
         self.logbox.pack(fill="both", expand=True, padx=12, pady=12)
+        tk.Label(self.root, text="Select ONLY reviewed files to install:").pack()
+        self.files = tk.Listbox(self.root, selectmode=tk.MULTIPLE, height=8, exportselection=False)
+        self.files.pack(fill="x", padx=12)
         bar = tk.Frame(self.root)
         bar.pack(pady=8)
         self.buttons = []
         for title, task in [
             ("Check updates", lambda: self.start(self.check)),
-            ("Install ALL changed/new", self.confirm_install),
+            ("Install selected files", self.confirm_install),
             ("Restore backup", self.confirm_restore),
         ]:
             btn = tk.Button(bar, text=title, padx=10, command=task)
@@ -134,15 +148,26 @@ class UI:
                                     self.logbox.see("end")))
 
     def check(self, log):
-        update(log, False)
-        self.last_check = True
+        revision, files = update(log, False)
+        self.root.after(0, lambda: self.show_changes(revision, files))
+
+    def show_changes(self, revision, files):
+        self.last_check = revision
+        self.available = files
+        self.files.delete(0, tk.END)
+        for name, exists in files:
+            self.files.insert(tk.END, ("UPDATE  " if exists else "NEW     ") + name)
 
     def confirm_install(self):
         if not self.last_check:
             messagebox.showwarning("Check first", "Click Check updates before installing.")
             return
-        if messagebox.askyesno("Install ALL", "Close the main editor first. This replaces ALL changed/new Python files. Have you reviewed the changes and made a separate backup?"):
-            self.start(lambda log: update(log, True))
+        selected = [self.available[i][0] for i in self.files.curselection()]
+        if not selected:
+            messagebox.showwarning("Select files", "Select at least one reviewed file.")
+            return
+        if messagebox.askyesno("Install selected", "Close the main editor first. Back up and replace ONLY:\\n" + "\\n".join(selected) + "\\nProceed?"):
+            self.start(lambda log: update(log, True, selected, self.last_check))
 
     def confirm_restore(self):
         if messagebox.askyesno("Restore", "Close the main editor first. Restore the latest backup?"):
@@ -151,13 +176,14 @@ class UI:
     def start(self, task):
         for b in self.buttons:
             b.configure(state="disabled")
+        self.files.configure(state="disabled")
         def work():
             try:
                 task(self.log)
             except Exception as exc:
                 self.log("ERROR: " + str(exc))
             finally:
-                self.root.after(0, lambda: [b.configure(state="normal") for b in self.buttons])
+                self.root.after(0, lambda: ([b.configure(state="normal") for b in self.buttons], self.files.configure(state="normal")))
         threading.Thread(target=work, daemon=True).start()
 
     def run(self):
