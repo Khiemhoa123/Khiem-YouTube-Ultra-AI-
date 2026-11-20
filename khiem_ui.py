@@ -430,6 +430,8 @@ class KhiemYoutube:
                 label
             )
 
+        ttk.Checkbutton(self.project_tab, text="SMART INTERVIEW INTRO (30s max, original audio)", variable=self.interview_enabled).pack(anchor="w", pady=8)
+
         ttk.Label(
             self.project_tab,
             text=(
@@ -775,6 +777,11 @@ class KhiemYoutube:
                 config,
                 logger
             )
+
+            if config.get("interview_enabled") and mode != "check":
+                from smart_interview_intro import build_intro_part, prepend_intro
+                intro = build_intro_part(config, logger)
+                parts = prepend_intro(parts, intro)
 
             timeline = (
                 Path(config["out"])
