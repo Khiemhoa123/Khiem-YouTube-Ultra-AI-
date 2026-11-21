@@ -211,15 +211,25 @@ def plan(c, log):
             ('image', I, c['images']),
             ('video', V, c['videos'])
         ]:
-            folders = ([Path(c['project_folder'])] if shared is not None else [
-                x for x in Path(root).iterdir()
+            # Strict section ownership: only numbered top-level folders.
+            base = Path(root).resolve()
+            folders = sorted(
+                x for x in base.iterdir()
                 if x.is_dir() and number(x) == n
-            ])
+                and x.resolve().parent == base
+            )
+            if len(folders) > 1:
+                raise ValueError(f'Phần {n}: nhiều thư mục trùng số trong {base}.')
+            allowed = set(shared[kind + 's']) if shared is not None else None
 
             pools[kind] = []
 
             for folder in folders:
-                for src in (shared[kind + 's'] if shared is not None else sorted(folder.rglob('*'))):
+                for src in sorted(folder.rglob('*')):
+                    if not src.resolve().is_relative_to(folder.resolve()):
+                        continue
+                    if allowed is not None and src not in allowed:
+                        continue
                     if (
                         not src.is_file()
                         or src.suffix.lower() not in ext
@@ -277,6 +287,10 @@ def plan(c, log):
                     f'Tổng video nguồn: '
                     f'{total_video:.2f}s'
                 )
+
+        if not pools['image'] and not pools['video']:
+            raise ValueError(f'FOLDER LOCK: Phần {n} không có tư liệu trong thư mục riêng. Không lấy chéo.')
+        log(f'FOLDER LOCK: Phần {n} chỉ sử dụng tư liệu trong thư mục cùng số.')
 
         aligned = []
 
@@ -533,11 +547,8 @@ def plan(c, log):
                 video_relevant = best_video is not None and (
                     best_image is None or best_video[2][0] >= best_image[2][0] - 0.85
                 )
-                if need_video and video_relevant:
-                    chosen = best_video
-                else:
-                    eligible = [o for o in options if o[0] != 'video' or video_relevant]
-                    chosen = max(eligible or options, key=option_score)
+                eligible = [o for o in options if o[0] != 'video' or video_relevant]
+                chosen = max(eligible or options, key=lambda o: o[2][0])
                 kind, nf, selected = chosen
                 if need_video and not videos and not warned_shortage:
                     log(f'Phần {n}: thiếu video phù hợp, tiếp tục với ảnh.')
