@@ -182,6 +182,9 @@ def insert_interview_cutaways(parts, intro, c, log):
     # Work in absolute timeline coordinates. Re-evaluate candidates after
     # each insertion and do not rely on the order of Number processing.
     for p in sorted(parts, key=lambda part: float(part.get("clips", [{}])[0].get("start", 0))):
+        # Part one is the Opening; cutaways belong to numbered chapters only.
+        if int(p.get("number", 0)) <= 1:
+            continue
         clips = p.get("clips", [])
         duration = float(p.get("duration", 0))
         if not clips or duration < 35:
