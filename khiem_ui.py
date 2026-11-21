@@ -299,6 +299,9 @@ class KhiemYoutube:
         )
         header.pack(fill="x")
 
+        ttk.Button(header, text="CẬP NHẬT GITHUB", style="Accent.TButton",
+                   command=self.open_safe_updater).pack(side="right", anchor="n", padx=(12, 0))
+
         tk.Label(
             header,
             text="KHIÊM YOUTUBE",
@@ -708,10 +711,7 @@ class KhiemYoutube:
             )
             self.buttons.append(button)
 
-        ttk.Button(
-            actions, text="CẬP NHẬT GITHUB",
-            command=self.open_safe_updater
-        ).pack(side="right", padx=(10, 0))
+
 
         ttk.Progressbar(
             self.export_tab,
