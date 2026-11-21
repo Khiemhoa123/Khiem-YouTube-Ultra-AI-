@@ -439,7 +439,7 @@ def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
     known=set()
     for p in root.rglob("*"):
         if stop.is_set(): return
-        if p.is_file() and p.suffix.lower() in IMG and p.stat().st_size<=30*1024**2:
+        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"} and p.stat().st_size<=30*1024**2:
             known.add(hashlib.sha256(p.read_bytes()).hexdigest())
     for part in parts:
         if stop.is_set(): return
@@ -450,7 +450,7 @@ def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
         folder.mkdir(exist_ok=True)
         if folder.resolve().parent!=root: raise ValueError("Thư mục ngoài dự án.")
         target=ni if part["duration"] is None else min(120,max(ni,math.ceil(part["duration"]/6*1.15)))
-        count=sum(p.is_file() and p.suffix.lower() in IMG for p in folder.rglob("*"))
+        count=sum(p.is_file() and p.suffix.lower() in {".jpg", ".jpeg"} for p in folder.rglob("*"))
         queries=list(dict.fromkeys([person]+[person+" "+q for q in part["queries"][:4]]))
         for q in queries:
             if stop.is_set() or count>=target: break
@@ -472,7 +472,7 @@ def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
                 if stop.wait(1): return
                 for p in inbox.iterdir():
                     if stop.is_set() or count>=target: break
-                    if p.name in before or not p.is_file() or p.suffix.lower() not in IMG: continue
+                    if p.name in before or not p.is_file() or p.suffix.lower() not in {".jpg", ".jpeg"}: continue
                     try:
                         size=p.stat().st_size
                         if stable.get(p.name)!=size:
@@ -483,7 +483,7 @@ def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
                         with Image.open(p) as im:
                             if im.width<640 or im.height<360 or im.width*im.height>40000000:
                                 before.add(p.name); continue
-                            ext={"JPEG":".jpg","PNG":".png","WEBP":".webp"}.get(im.format)
+                            ext=".jpg" if im.format=="JPEG" else None
                             im.verify()
                         before.add(p.name)
                         if not ext: continue
@@ -524,7 +524,7 @@ def add_tab(notebook):
     advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
-    ttk.Label(frame,text="SMART AUTO MEDIA V4.1 | IMAGEYE AUTO CONTROL - thử nghiệm").pack(anchor="w")
+    ttk.Label(frame,text="SMART AUTO MEDIA V4.2 | IMAGEYE JPG - thử nghiệm").pack(anchor="w")
     def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
