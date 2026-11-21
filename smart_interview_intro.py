@@ -50,14 +50,18 @@ def choose_intro(c, log):
     model = None
     try:
         from whisper_audio_fix_v11 import get_model, transcribe_media
+        log("WHISPER: Đang nạp mô hình nhận diện tiếng nói.")
         model = get_model()
+        log("WHISPER: Mô hình sẵn sàng.")
     except Exception as exc:
         log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
     candidates = []
     fallback = []
-    for path in videos:
+    log(f"INTERVIEW: Tìm thấy {len(videos)} video.")
+    for index, path in enumerate(videos, 1):
         try:
+            log(f"INTERVIEW {index}/{len(videos)}: Kiểm tra {path.name}")
             info = _probe(path)
             if not any(s.get("codec_type") == "audio" for s in info["streams"]):
                 log("Bỏ qua video không có tiếng: " + path.name)
@@ -67,8 +71,14 @@ def choose_intro(c, log):
                 fallback.append((str(path), duration))
             if model is None:
                 continue
+            log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
             segments, _ = transcribe_media(path, model=model, vad_filter=True, beam_size=3)
-            rows = list(segments)
+            log("WHISPER: Bắt đầu nhận diện lời thoại.")
+            rows = []
+            for segment in segments:
+                rows.append(segment)
+                log(f"WHISPER {index}/{len(videos)}: {segment.end:.1f}/{duration:.1f}s | {len(rows)} đoạn | {segment.text.strip()[:90]}")
+            log(f"INTERVIEW: Đã nhận diện {len(rows)} đoạn, bắt đầu chấm điểm.")
             # Sliding windows over complete Whisper segments. No mid-sentence cut.
             for i, first in enumerate(rows):
                 for j in range(i, min(len(rows), i + 12)):
