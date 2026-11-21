@@ -16,8 +16,25 @@ from tkinter import ttk, messagebox
 ROOT = Path(__file__).resolve().parent
 REPO = "https://github.com/Khiemhoa123/Khiem-YouTube-Ultra-AI-.git"
 BACKUPS = ROOT / "_AUTO_UPDATE_BACKUPS"
-SKIP = {"khiem_auto_update.py"}
+SKIP = set()
 KEEP = {"khiem_settings.json", "project_queue_v11.json"}
+
+# Conservative cleanup: only unmistakable disposable artifacts, never source,
+# launchers, models, settings, project media, or unknown files.
+CLEAN_SUFFIXES = (".pyc", ".pyo", ".tmp", ".khiem_new")
+CLEAN_NAMES = {"__pycache__"}
+CLEAN_ARCHIVE = ROOT / "_CLEANUP_ARCHIVE"
+
+def cleanup_candidates():
+    found = []
+    for p in ROOT.iterdir():
+        if p.is_symlink() or p.name in {BACKUPS.name, CLEAN_ARCHIVE.name}:
+            continue
+        if p.is_dir() and p.name in CLEAN_NAMES:
+            found.append(p)
+        elif p.is_file() and p.name.lower().endswith(CLEAN_SUFFIXES):
+            found.append(p)
+    return found
 
 def git(*args, cwd=None):
     env = dict(os.environ)
@@ -50,6 +67,7 @@ class UI:
         self.backup = tk.BooleanVar(value=True)
         self.verify = tk.BooleanVar(value=True)
         self.restart = tk.BooleanVar(value=False)
+        self.cleanup_enabled = tk.BooleanVar(value=False)
         ttk.Label(self.root, text="CẬP NHẬT KHIÊM YOUTUBE",
                   font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=16, pady=(14, 5))
         ttk.Label(self.root, text="Xem thay đổi, chọn file và xác nhận trước khi cài. Không cập nhật khi đang xuất video.").pack(anchor="w", padx=16)
@@ -75,6 +93,8 @@ class UI:
                         state="disabled").pack(anchor="w", padx=8)
         ttk.Checkbutton(options, text="Khởi động lại sau khi cập nhật (đóng phần mềm rồi mở thủ công để an toàn)",
                         variable=self.restart, state="disabled").pack(anchor="w", padx=8)
+        ttk.Checkbutton(options, text="Dọn dẹp file tạm sau khi cập nhật (xem trước và xác nhận riêng)", variable=self.cleanup_enabled).pack(anchor="w", padx=8, pady=3)
+        ttk.Button(bar, text="XEM & DỌN FILE TẠM", command=self.cleanup_preview).pack(side="left", padx=(8, 0))
         ttk.Label(self.root, text="Danh sách file Python thay đổi").pack(anchor="w", padx=16)
         frame = ttk.Frame(self.root)
         frame.pack(fill="both", expand=True, padx=16, pady=6)
@@ -198,6 +218,8 @@ class UI:
                     os.replace(tmp, dst)
                     replaced.append(dst)
                 self.log("THÀNH CÔNG. Sao lưu: " + str(backup))
+                if self.cleanup_enabled.get():
+                    self.root.after(0, self.cleanup_preview)
                 self.root.after(0, lambda: messagebox.showinfo(
                     "Hoàn tất", "Đã cập nhật. Hãy mở lại Khiêm YouTube để sử dụng bản mới."))
             except Exception:
@@ -212,6 +234,58 @@ class UI:
                 for tmp in staged:
                     tmp.unlink(missing_ok=True)
         self.task(work)
+
+    def cleanup_preview(self):
+        if self.busy:
+            return
+        items = cleanup_candidates()
+        if not items:
+            messagebox.showinfo("Dọn dẹp", "Không có file tạm an toàn cần dọn. Các file Python, BAT và dữ liệu dự án được giữ nguyên.")
+            return
+        window = tk.Toplevel(self.root)
+        window.title("Xem trước dọn dẹp | không xóa vĩnh viễn")
+        window.geometry("650x430")
+        ttk.Label(window, text="Chỉ chuyển file tạm vào kho lưu trữ, không xóa mã nguồn.", wraplength=600).pack(anchor="w", padx=12, pady=10)
+        pane = ttk.Frame(window)
+        pane.pack(fill="both", expand=True, padx=12)
+        listbox = tk.Listbox(pane, selectmode="extended")
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(pane, command=listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        listbox.configure(yscrollcommand=scrollbar.set)
+        for item in items:
+            listbox.insert("end", item.name + ("/" if item.is_dir() else ""))
+        listbox.select_set(0, "end")
+        def execute():
+            indices = listbox.curselection()
+            chosen = [items[i] for i in indices]
+            if not chosen:
+                return
+            if not messagebox.askyesno("Xác nhận dọn dẹp",
+                "Đã đóng phần mềm chính và dừng mọi dự án?\\n\\n"
+                + "Chuyển " + str(len(chosen)) + " mục vào kho lưu trữ?\\n"
+                + "Không xóa vĩnh viễn, có thể khôi phục thủ công.", parent=window):
+                return
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            dest = CLEAN_ARCHIVE / stamp
+            dest.mkdir(parents=True, exist_ok=False)
+            moved = []
+            try:
+                for item in chosen:
+                    # Recheck allowlist and root before moving.
+                    if item not in cleanup_candidates() or item.parent != ROOT:
+                        continue
+                    shutil.move(str(item), str(dest / item.name))
+                    moved.append(item.name)
+                (dest / "cleanup_manifest.json").write_text(
+                    json.dumps({"moved": moved}, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+                self.log("Đã lưu trữ " + str(len(moved)) + " file tạm tại " + str(dest))
+                window.destroy()
+                messagebox.showinfo("Dọn dẹp", "Đã chuyển " + str(len(moved)) + " mục vào: " + str(dest))
+            except Exception as exc:
+                messagebox.showerror("Dọn dẹp", str(exc), parent=window)
+        ttk.Button(window, text="CHUYỂN MỤC ĐÃ CHỌN VÀO KHO LƯU TRỮ", command=execute).pack(pady=10)
 
     def restore(self):
         if self.busy:
