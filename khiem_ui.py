@@ -409,12 +409,15 @@ class KhiemYoutube:
         row = ttk.Frame(channel)
         row.pack(fill="x")
         ttk.Label(row, text="Tìm kênh:").pack(side="left", padx=(0, 6))
-        ttk.Entry(row, textvariable=self.creator_channel_search, width=19).pack(side="left", padx=(0, 8))
+        self.creator_channel_search_entry = ttk.Entry(row, textvariable=self.creator_channel_search, width=19)
+        self.creator_channel_search_entry.pack(side="left", padx=(0, 8))
         self.creator_channel_dropdown = ttk.Combobox(row, textvariable=self.creator_channel,
                                                      state="readonly", width=30)
         self.creator_channel_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "+ THÊM KÊNH", self.creator_show_add_channel, primary=True).pack(side="left", padx=(0, 6))
         self.studio_button(row, "SỬA KÊNH", self.creator_show_edit_channel).pack(side="left")
+        self.creator_channel_suggestions = tk.Listbox(channel, height=5, exportselection=False, bg=COLORS["input"], fg=COLORS["text"], selectbackground=COLORS["accent"], selectforeground=COLORS["bg"], relief="flat", highlightthickness=0)
+        self.creator_channel_suggestions.bind("<ButtonRelease-1>", lambda _e: self.creator_pick_suggestion("channel"))
         ttk.Label(channel, textvariable=self.creator_channel_path_text,
                   foreground=COLORS["muted"]).pack(anchor="w", pady=(7, 0))
 
@@ -432,13 +435,22 @@ class KhiemYoutube:
         row = ttk.Frame(chooser)
         row.pack(fill="x")
         ttk.Label(row, text="Tìm dự án:").pack(side="left", padx=(0, 6))
-        ttk.Entry(row, textvariable=self.creator_project_search, width=19).pack(side="left", padx=(0, 8))
+        self.creator_project_search_entry = ttk.Entry(row, textvariable=self.creator_project_search, width=19)
+        self.creator_project_search_entry.pack(side="left", padx=(0, 8))
+        self.creator_project_suggestions = tk.Listbox(chooser, height=5, exportselection=False, bg=COLORS["input"], fg=COLORS["text"], selectbackground=COLORS["accent"], selectforeground=COLORS["bg"], relief="flat", highlightthickness=0)
+        self.creator_project_suggestions.bind("<ButtonRelease-1>", lambda _e: self.creator_pick_suggestion("project"))
         self.creator_dropdown = ttk.Combobox(row, textvariable=self.creator_selected,
                                              state="readonly", width=30)
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 6))
         self.studio_button(row, "MỞ THƯ MỤC", self.creator_open_selected).pack(side="left", padx=(0, 6))
         self.studio_button(row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
+        self.creator_channel_search_entry.bind("<Down>", lambda _e: self.creator_focus_suggestions("channel"))
+        self.creator_project_search_entry.bind("<Down>", lambda _e: self.creator_focus_suggestions("project"))
+        self.creator_channel_search_entry.bind("<Return>", lambda _e: self.creator_pick_first("channel"))
+        self.creator_project_search_entry.bind("<Return>", lambda _e: self.creator_pick_first("project"))
+        self.creator_channel_suggestions.bind("<Return>", lambda _e: self.creator_pick_suggestion("channel"))
+        self.creator_project_suggestions.bind("<Return>", lambda _e: self.creator_pick_suggestion("project"))
         self.creator_channel_search.trace_add("write", lambda *_: self.creator_filter_channels())
         self.creator_project_search.trace_add("write", lambda *_: self.creator_filter_projects())
         self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(),
@@ -448,19 +460,70 @@ class KhiemYoutube:
         self.creator_sync_edit()
         self.creator_update_channel_path()
 
+    def creator_show_suggestions(self, kind, matches, query):
+        widget = self.creator_channel_suggestions if kind == "channel" else self.creator_project_suggestions
+        widget.delete(0, "end")
+        if not query or not matches:
+            widget.pack_forget()
+            return
+        for name in matches[:30]:
+            widget.insert("end", name)
+        widget.configure(height=min(len(matches), 6))
+        if not widget.winfo_manager():
+            widget.pack(fill="x", padx=(0, 8), pady=(4, 2))
+
+    def creator_focus_suggestions(self, kind):
+        widget = self.creator_channel_suggestions if kind == "channel" else self.creator_project_suggestions
+        if widget.size():
+            widget.focus_set()
+            widget.selection_clear(0, "end")
+            widget.selection_set(0)
+            widget.activate(0)
+        return "break"
+
+    def creator_pick_first(self, kind):
+        widget = self.creator_channel_suggestions if kind == "channel" else self.creator_project_suggestions
+        if widget.size():
+            widget.selection_clear(0, "end")
+            widget.selection_set(0)
+            self.creator_pick_suggestion(kind)
+        return "break"
+
+    def creator_pick_suggestion(self, kind):
+        widget = self.creator_channel_suggestions if kind == "channel" else self.creator_project_suggestions
+        selection = widget.curselection()
+        if not selection:
+            return "break"
+        name = widget.get(selection[0])
+        if kind == "channel":
+            if name not in self.creator_channels:
+                return "break"
+            self.creator_channel.set(name)
+            self.creator_channel_search.set("")
+            self.creator_project_search.set("")
+            self.creator_channel_search_entry.focus_set()
+        else:
+            if name not in getattr(self, "creator_project_names", []):
+                return "break"
+            self.creator_selected.set(name)
+            self.creator_project_search.set("")
+            self.creator_project_search_entry.focus_set()
+        widget.pack_forget()
+        return "break"
+
     def creator_filter_channels(self):
         names = sorted(self.creator_channels, key=str.casefold)
         query = self.creator_channel_search.get().strip().casefold()
         matches = [name for name in names if query in name.casefold()]
         self.creator_channel_dropdown.configure(values=matches)
-        # Search only changes the displayed options, never the active channel.
+        self.creator_show_suggestions("channel", matches, query)
 
     def creator_filter_projects(self):
         query = self.creator_project_search.get().strip().casefold()
         names = getattr(self, "creator_project_names", [])
         matches = [name for name in names if query in name.casefold()]
         self.creator_dropdown.configure(values=matches)
-        # Never select another project just because its name matches a query.
+        self.creator_show_suggestions("project", matches, query)
 
     def creator_update_channel_path(self):
         try:
