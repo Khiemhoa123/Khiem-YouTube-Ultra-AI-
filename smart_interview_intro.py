@@ -160,8 +160,8 @@ def insert_interview_cutaways(parts, intro, c, log):
 
     # Only use spoken interview passages we can actually understand.
     try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        from whisper_audio_fix_v11 import get_model, transcribe_media
+        model = get_model()
         segments, _ = transcribe_media(source, model=model, vad_filter=True, beam_size=3)
         rows = list(segments)
         del model
