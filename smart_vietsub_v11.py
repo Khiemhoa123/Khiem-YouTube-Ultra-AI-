@@ -30,12 +30,9 @@ _WHISPER = None
 
 def _voice_rows(voice, log):
     global _WHISPER
-    from faster_whisper import WhisperModel
-    # Accurate timestamps are obtained from the actual audio, not text length.
-    if _WHISPER is None:
-        _WHISPER = WhisperModel("base", device="cpu", compute_type="int8")
-    model = _WHISPER
-    segments, info = model.transcribe(str(voice), vad_filter=True, beam_size=3)
+    from whisper_audio_fix_v11 import transcribe_media
+    # Decode through FFmpeg to avoid incompatible PyAV metadata_errors.
+    segments, info = transcribe_media(voice, vad_filter=True, beam_size=3)
     rows = [(float(s.start), float(s.end), s.text.strip())
             for s in segments if s.text.strip() and s.end > s.start]
     return rows, getattr(info, "language", None)
@@ -119,8 +116,7 @@ def create(c, parts, log):
     original = root / (c["name"] + ".original.srt")
     _write_srt(original, sorted(original_rows))
     if not all_rows:
-        log("VIETSUB: Chưa tạo được bản dịch tiếng Việt. Đã lưu lời gốc: " + str(original))
-        return None
+        raise RuntimeError("Không tạo được Vietsub tiếng Việt. Xem lỗi Whisper/dịch phía trên. Đã lưu lời gốc: " + str(original))
     output = root / (c["name"] + ".vi.srt")
     _write_srt(output, sorted(all_rows))
     log("VIETSUB: Đã tạo " + str(output) + ". MP4 không có phụ đề.")
