@@ -33,6 +33,21 @@ def _script_text(folder):
         return ""
     return files[0].read_text(encoding="utf-8-sig", errors="replace")[:6000]
 
+def _sample_rows(path, duration, model, log):
+    from whisper_audio_fix_v11 import transcribe_media
+    # Bounded sampling: at most three 25-second windows per source.
+    offsets = sorted(set(round(max(0, duration-25)*f, 2) for f in (0.12, 0.48, 0.78)))
+    rows = []
+    from types import SimpleNamespace
+    with tempfile.TemporaryDirectory() as td:
+        for offset in offsets:
+            wav = Path(td)/"sample.wav"
+            _run(["ffmpeg","-v","error","-y","-ss",str(offset),"-i",str(path),"-t","25","-vn","-ac","1","-ar","16000",str(wav)])
+            segments, _ = transcribe_media(wav, model=model, vad_filter=True, beam_size=1)
+            for seg in segments:
+                rows.append(SimpleNamespace(start=float(seg.start)+offset,end=float(seg.end)+offset,text=seg.text))
+    return rows
+
 def choose_intro(c, log):
     """Return optional intro dict. Never silently select a low-confidence passage."""
     folder = str(c.get("interview_folder", "")).strip()
@@ -40,13 +55,13 @@ def choose_intro(c, log):
         return None
     root = Path(folder)
     if not root.is_dir():
-        raise ValueError("Thư mục phỏng vấn không tồn tại: " + folder)
+        log("Bỏ Interview: thư mục không tồn tại."); return None
     videos = [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_EXT]
     if not videos:
-        raise ValueError("Thư mục phỏng vấn không có video")
+        log("Bỏ Interview: không có video."); return None
     script = _script_text(c["txt"])
     if not script.strip():
-        log("Không đọc được TXT mở đầu; ưu tiên đoạn phỏng vấn có tiếng.")
+        log("Bỏ Interview: thiếu TXT mở đầu."); return None
     model = None
     try:
         from whisper_audio_fix_v11 import get_model, transcribe_media
@@ -55,11 +70,13 @@ def choose_intro(c, log):
         log("WHISPER: Mô hình sẵn sàng.")
     except Exception as exc:
         log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
-    max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
+    if model is None: return None
+    max_seconds = min(8.0, max(5.0, float(c.get("interview_max_seconds", 8))))
+    sampled = {}
     candidates = []
     fallback = []
     log(f"INTERVIEW: Tìm thấy {len(videos)} video.")
-    for index, path in enumerate(videos, 1):
+    for index, path in enumerate(sorted(videos)[:5], 1):
         try:
             log(f"INTERVIEW {index}/{len(videos)}: Kiểm tra {path.name}")
             info = _probe(path)
@@ -72,13 +89,9 @@ def choose_intro(c, log):
             if model is None:
                 continue
             log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
-            segments, _ = transcribe_media(path, model=model, vad_filter=True, beam_size=3)
-            log("WHISPER: Bắt đầu nhận diện lời thoại.")
-            rows = []
-            for segment in segments:
-                rows.append(segment)
-                log(f"WHISPER {index}/{len(videos)}: {segment.end:.1f}/{duration:.1f}s | {len(rows)} đoạn | {segment.text.strip()[:90]}")
-            log(f"INTERVIEW: Đã nhận diện {len(rows)} đoạn, bắt đầu chấm điểm.")
+            rows = _sample_rows(path, duration, model, log)
+            sampled[str(path)] = rows
+            log(f"INTERVIEW: {len(rows)} đoạn mẫu.")
             # Sliding windows over complete Whisper segments. No mid-sentence cut.
             for i, first in enumerate(rows):
                 for j in range(i, min(len(rows), i + 12)):
@@ -102,21 +115,15 @@ def choose_intro(c, log):
         log("Top đoạn phỏng vấn (điểm khớp từ ngữ, chưa xác minh khuôn mặt):")
         for score, path, start, dur, phrase in candidates[:3]:
             log(f"  {Path(path).name} | {start:.1f}s | {dur:.1f}s | {score:.2f} | {phrase[:100]}")
-        if best[0] < 0.045:
-            log("CẢNH BÁO: Không có đoạn khớp nội dung. Dùng đoạn phỏng vấn dự phòng có lời nói.")
+        if best[0] < 0.12 or _similarity(script, best[4]) < 0.09:
+            log("Bỏ Interview: không có đoạn đủ phù hợp.")
+            return None
+        c["_interview_sample_rows"] = [(r.start,r.end,r.text) for r in sampled[best[1]]]
         return {"source": best[1], "source_start": best[2],
                 "duration": best[3], "transcript": best[4], "score": best[0]}
-    if fallback:
-        # No transcribed passage; use a valid source with original sound.
-        # Keep the intro short and never exceed the configured 30-second cap.
-        path, duration = sorted(fallback, key=lambda item: item[1], reverse=True)[0]
-        seconds = min(max_seconds, 12.0, duration)
-        if seconds > 0.5:
-            log(f"CẢNH BÁO: Whisper không tìm thấy lời thoại. Dùng intro dự phòng {Path(path).name} ({seconds:.1f}s), giữ tiếng gốc.")
-            return {"source": path, "source_start": 0.0,
-                    "duration": seconds, "transcript": "", "score": 0.0}
-    log("CẢNH BÁO: Không có video phỏng vấn kèm âm thanh hợp lệ. Bỏ qua intro, tiếp tục xuất bình thường.")
+    log("Bỏ Interview: không có đoạn phù hợp.")
     return None
+
 
 def prepend_mp4(c, intro, log):
     """Prepend interview with original sound. Re-encode for reliable A/V sync."""
@@ -170,11 +177,9 @@ def insert_interview_cutaways(parts, intro, c, log):
 
     # Only use spoken interview passages we can actually understand.
     try:
-        from whisper_audio_fix_v11 import get_model, transcribe_media
-        model = get_model()
-        segments, _ = transcribe_media(source, model=model, vad_filter=True, beam_size=3)
-        rows = list(segments)
-        del model
+        from types import SimpleNamespace
+        rows = [SimpleNamespace(start=a,end=b,text=t) for a,b,t in c.get("_interview_sample_rows", [])]
+        if not rows: return parts
     except Exception as exc:
         log("SMART STORY: Không xác minh được nội dung interview, bỏ qua cutaway: " + str(exc))
         return parts
