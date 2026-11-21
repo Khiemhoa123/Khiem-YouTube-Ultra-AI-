@@ -442,9 +442,11 @@ class KhiemYoutube:
         self.creator_dropdown = ttk.Combobox(row, textvariable=self.creator_selected,
                                              state="readonly", width=30)
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 6))
-        self.studio_button(row, "MỞ THƯ MỤC", self.creator_open_selected).pack(side="left", padx=(0, 6))
-        self.studio_button(row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
+        actions = ttk.Frame(chooser)
+        actions.pack(fill="x", pady=(10, 0))
+        self.studio_button(actions, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 8))
+        self.studio_button(actions, "MỞ THƯ MỤC", self.creator_open_selected).pack(side="left")
+        self.studio_button(actions, "CHUYỂN SANG TAB 01  →  ĐIỀN ĐƯỜNG DẪN", self.creator_apply, primary=True).pack(side="right")
         self.creator_channel_search_entry.bind("<Down>", lambda _e: self.creator_focus_suggestions("channel"))
         self.creator_project_search_entry.bind("<Down>", lambda _e: self.creator_focus_suggestions("project"))
         self.creator_channel_search_entry.bind("<Return>", lambda _e: self.creator_pick_first("channel"))
@@ -744,8 +746,8 @@ class KhiemYoutube:
             messagebox.showwarning("Đang xử lý", "Đợi tác vụ hiện tại hoàn thành trước khi đổi dự án.")
             return
         name = self.creator_selected.get().strip()
-        if not name:
-            messagebox.showinfo("Chọn dự án", "Chưa có dự án. Hãy tạo dự án trước.")
+        if name not in getattr(self, "creator_project_names", []):
+            messagebox.showinfo("Chọn dự án", "Hãy chọn một dự án có trong danh sách của kênh hiện tại.")
             return
         try:
             target = self.creator_channel_path() / name
