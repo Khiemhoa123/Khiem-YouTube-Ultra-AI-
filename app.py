@@ -746,7 +746,8 @@ def render(c, parts, log, progress):
                         'format=auto,setsar=1'
                     )
                 else:
-                    base = fit
+                    color = {"Nền trắng":"white", "Nền xám":"gray", "Nền xanh đen":"0x101722"}.get(c.get("background"), "black")
+                    base = fit.replace(":(oh-ih)/2,", ":(oh-ih)/2:color=" + color + ",")
 
                 if s['type'] == 'image':
                     e = s['effect']
@@ -937,7 +938,7 @@ def render(c, parts, log, progress):
                         'Slide Left': 'slideleft',
                         'Slide Right': 'slideright',
                         'Blur': 'hblur',
-                        'Zoom Transition': 'zoomin'
+                        'Zoom Transition': 'zoomin', 'Mờ đen': 'fadeblack'
                     }
 
                     style = (
