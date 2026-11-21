@@ -338,7 +338,7 @@ class KhiemYoutube:
         self.split = ttk.Panedwindow(self.root, orient="vertical")
         self.split.pack(fill="both", expand=True, padx=12, pady=(0, 10))
         self.tabs = ttk.Notebook(self.split)
-        self.split.add(self.tabs, weight=3)
+        self.split.add(self.tabs, weight=1)
 
         self.project_tab = ttk.Frame(
             self.tabs, padding=22
@@ -664,19 +664,20 @@ class KhiemYoutube:
 
     def build_export(self):
         self.log_panel = ttk.Frame(self.split, padding=(8, 4))
-        self.split.add(self.log_panel, weight=2)
-        self.root.after(200, lambda: self.resize_log(0.60))
+        self.split.add(self.log_panel, weight=0)
+        self.root.after(200, lambda: self.resize_log(0.80))
+        self.tabs.bind("<<NotebookTabChanged>>", lambda e: self.resize_log(.92 if self.tabs.select() == str(self.editor_tab) else .80), add="+")
         header = ttk.Frame(self.log_panel)
         header.pack(fill="x")
         ttk.Label(header, text="NHẬT KÝ XỬ LÝ", foreground=COLORS["accent"], font=("Segoe UI", 11, "bold")).pack(side="left")
         for label, fn in (("Xóa", lambda: self.log_box.delete("1.0", "end")),
-                          ("Phóng to", lambda: self.resize_log(.18)),
-                          ("Thu nhỏ", lambda: self.resize_log(.88)),
-                          ("Mặc định", lambda: self.resize_log(.60))):
+                          ("Phóng to", lambda: self.resize_log(.50)),
+                          ("Thu nhỏ", lambda: self.resize_log(1.0)),
+                          ("Mặc định", lambda: self.resize_log(.80))):
             ttk.Button(header, text=label, command=fn).pack(side="right", padx=2)
         body = ttk.Frame(self.log_panel)
         body.pack(fill="both", expand=True)
-        self.log_box = tk.Text(body, height=10, bg="#0D141E", fg="#DDE9F5",
+        self.log_box = tk.Text(body, height=3, bg="#0D141E", fg="#DDE9F5",
                                insertbackground="white", font=("Consolas", 11), relief="flat", wrap="word")
         for tag, color in (("warning","#FBBF24"),("error","#F87171"),("success","#4ADE80"),("info","#DDE9F5")):
             self.log_box.tag_configure(tag, foreground=color)
@@ -686,7 +687,9 @@ class KhiemYoutube:
         self.log_box.pack(side="left", fill="both", expand=True)
 
     def resize_log(self, fraction):
-        self.split.sashpos(0, int(self.split.winfo_height()*fraction))
+        height = self.split.winfo_height()
+        if height > 100:
+            self.split.sashpos(0, min(height - 40, int(height*fraction)))
 
     def build_queue(self):
         self.queue_tab = ttk.Frame(self.tabs, padding=12)
