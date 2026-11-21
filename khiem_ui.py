@@ -350,6 +350,13 @@ class KhiemYoutube:
         self.build_editor()
         self.build_export()
         self.build_queue()
+        try:
+            from smart_auto_media import add_tab
+            add_tab(self.tabs)
+        except Exception as exc:
+            media_tab = ttk.Frame(self.tabs, padding=12)
+            self.tabs.add(media_tab, text="05  TẢI TƯ LIỆU AI")
+            ttk.Label(media_tab, text="Không mở được bộ tải tư liệu: " + str(exc)).pack(anchor="w")
 
     def heading(self, parent, title):
         ttk.Label(
