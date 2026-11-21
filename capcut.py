@@ -90,50 +90,8 @@ def export(c,parts,log):
   for i,s in enumerate(clips):
    start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round((clips[i+1]['start']+float(intro['duration']) if intro else clips[i+1]['start'])*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
 
- # Add native editable Vietnamese subtitle track using the user-provided CapCut schema.
- subtitle_path=Path(c['out'])/'_vietsub_review'/(c['name']+'.vi.srt')
- if subtitle_path.is_file():
-  try:
-   import re
-   from capcut_v11_reference import REFERENCE
-   ref=REFERENCE
-   text_track=copy.deepcopy(ref['text_track']); text_track.update(id=uid(),segments=[])
-   def stamp(value):
-    h,m,tail=value.replace('.',',').split(':')
-    sec,ms=tail.split(',')
-    return (int(h)*3600+int(m)*60+int(sec))*1000000+int(ms.ljust(3,'0')[:3])*1000
-   raw_srt=subtitle_path.read_text(encoding='utf-8-sig')
-   for block in re.split(r'\n\s*\n',raw_srt.strip()):
-    lines=block.strip().splitlines()
-    times=next((line for line in lines if ' --> ' in line),None)
-    if not times:continue
-    idx=lines.index(times); start_text,end_text=times.split(' --> ',1)
-    start_us=stamp(start_text.strip()); end_us=stamp(end_text.strip().split()[0])
-    if end_us<=start_us:continue
-    caption='\n'.join(lines[idx+1:]).strip()
-    if not caption:continue
-    mat=copy.deepcopy(ref['text_material']); mat['id']=uid()
-    mat['name']='VIETSUB KIEM TRA'
-    rich=json.loads(mat['content']); rich['text']=caption
-    for style in rich.get('styles',[]):
-     style['range']=[0,len(caption)]
-     style.get('font',{}).pop('path',None)
-    mat['content']=json.dumps(rich,ensure_ascii=False)
-    mat['base_content']=mat['content']
-    mat['recognize_text']=caption
-    mat['words']=[]
-    mat['current_words']=[]
-    mts['texts'].append(mat)
-    seg=copy.deepcopy(ref['text_segment']);seg['id']=uid();seg['material_id']=mat['id']
-    seg['extra_material_refs']=[]
-    seg['target_timerange']={'start':start_us,'duration':end_us-start_us}
-    seg['render_index']=14000+len(text_track['segments'])
-    text_track['segments'].append(seg)
-   if text_track['segments']:
-    tracks['vietsub']=text_track
-    log('CapCut: đã chèn '+str(len(text_track['segments']))+' đoạn Vietsub native chỉnh sửa được')
-  except Exception as exc:
-   log('VIETSUB: Không thể chèn text track, giữ SRT để nhập thủ công: '+str(exc))
+ # Subtitles are optional and created in CapCut Pro after opening the draft.
+ # Never import stale SRT files from previous exports.
  # Safe native fade transition. No overlap or time shifts, never on interview.
  if str(c.get('transition','')).lower() not in ('không','none','off','cut','tắt'):
   try:
@@ -172,4 +130,4 @@ def export(c,parts,log):
   if (dest/'draft_cover.jpg').exists():shutil.copyfile(dest/'draft_cover.jpg',dt/'draft_cover.jpg')
  except Exception:
   shutil.rmtree(dest,ignore_errors=True); raise
- log('Đã ghi dự án: '+str(dest)+' | Mở lại CapCut để kiểm tra. Chuyển cảnh và Vietsub native thử nghiệm; kiểm tra CapCut trước khi xuất.'); return dest
+ log('Đã ghi dự án: '+str(dest)+' | Mở lại CapCut để kiểm tra. Chuyển cảnh native thử nghiệm; tạo phụ đề trong CapCut Pro nếu cần.'); return dest
