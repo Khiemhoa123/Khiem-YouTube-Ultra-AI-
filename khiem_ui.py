@@ -390,8 +390,9 @@ class KhiemYoutube:
         self.creator_name = tk.StringVar(value="")
         self.creator_base = tk.StringVar(value=str(Path.home() / "Documents" / "KHIEM YOUTUBE"))
         self.creator_preview = tk.StringVar(value="")
+        self.creator_selected = tk.StringVar(value="")
         self.heading(self.creator_tab, "TẠO DỰ ÁN MỚI")
-        ttk.Label(self.creator_tab, text="Nhập tên, chọn nơi lưu rồi tạo bộ thư mục. Tab 01 sẽ tự nhận đường dẫn.").pack(anchor="w", pady=(0, 16))
+        ttk.Label(self.creator_tab, text="Tạo nhiều dự án trước. Chọn dự án trong danh sách và bấm ĐIỀN TAB 01 khi cần dựng.").pack(anchor="w", pady=(0, 16))
         panel = ttk.LabelFrame(self.creator_tab, text="THÔNG TIN DỰ ÁN", padding=18)
         panel.pack(fill="x")
         ttk.Label(panel, text="Tên dự án").grid(row=0, column=0, sticky="w", pady=8)
@@ -408,8 +409,64 @@ class KhiemYoutube:
         ttk.Label(self.creator_tab, text="Thư mục được tạo: 01 - Voice | 02 - Kich Ban TXT | 03 - Hinh Anh | 04 - Video | 05 - Interview | 06 - Xuat Video", wraplength=900).pack(anchor="w", pady=16)
         buttons = ttk.Frame(self.creator_tab)
         buttons.pack(anchor="w")
-        self.studio_button(buttons, "TẠO DỰ ÁN & ĐIỀN TAB 01", self.creator_create, primary=True).pack(side="left", padx=(0, 8))
+        self.studio_button(buttons, "TẠO DỰ ÁN", self.creator_create, primary=True).pack(side="left", padx=(0, 8))
         self.studio_button(buttons, "MỞ THƯ MỤC", self.creator_open).pack(side="left")
+        chooser = ttk.LabelFrame(self.creator_tab, text="CHỌN DỰ ÁN ĐỂ DỰNG", padding=18)
+        chooser.pack(fill="x", pady=(18, 0))
+        ttk.Label(chooser, text="Tên dự án đã tạo").pack(anchor="w", pady=(0, 5))
+        choose_row = ttk.Frame(chooser)
+        choose_row.pack(fill="x")
+        self.creator_dropdown = ttk.Combobox(choose_row, textvariable=self.creator_selected,
+                                             state="readonly", width=48)
+        self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.studio_button(choose_row, "LÀM MỚI DANH SÁCH", self.creator_refresh).pack(side="left", padx=(0, 8))
+        self.studio_button(choose_row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
+        self.creator_base.trace_add("write", lambda *_: self.creator_refresh())
+        self.creator_refresh()
+
+
+    def creator_refresh(self):
+        base = Path(self.creator_base.get().strip()).expanduser()
+        folders = ("01 - Voice", "02 - Kich Ban TXT", "03 - Hinh Anh",
+                   "04 - Video", "05 - Interview", "06 - Xuat Video")
+        names = []
+        try:
+            if base.is_dir():
+                names = sorted((p.name for p in base.iterdir()
+                                if p.is_dir() and all((p / folder).is_dir() for folder in folders)),
+                               key=str.casefold)
+        except OSError:
+            pass
+        self.creator_dropdown.configure(values=names)
+        if self.creator_selected.get() not in names:
+            self.creator_selected.set(names[0] if names else "")
+
+    def creator_apply(self):
+        if self.busy or self.queue_running:
+            messagebox.showwarning("Đang xử lý", "Đợi tác vụ hiện tại hoàn thành trước khi đổi dự án.")
+            return
+        name = self.creator_selected.get().strip()
+        if not name:
+            messagebox.showinfo("Chọn dự án", "Chưa có dự án. Hãy tạo dự án trước.")
+            return
+        base = Path(self.creator_base.get().strip()).expanduser()
+        target = base / name
+        folders = {
+            "voice": "01 - Voice", "txt": "02 - Kich Ban TXT",
+            "images": "03 - Hinh Anh", "videos": "04 - Video",
+            "interview_folder": "05 - Interview", "out": "06 - Xuat Video"
+        }
+        if not all((target / dirname).is_dir() for dirname in folders.values()):
+            messagebox.showerror("Thiếu thư mục", "Dự án thiếu thư mục chuẩn. Hãy kiểm tra lại.")
+            return
+        self.vars["name"].set(name)
+        self.vars["project_folder"].set(str(target))
+        for key, dirname in folders.items():
+            self.vars[key].set(str(target / dirname))
+        self.interview_enabled.set(False)
+        self.save_settings()
+        self.tabs.select(self.project_tab)
+        self.log("Đã chọn dự án và điền Tab 01: " + name)
 
     def creator_choose(self):
         folder = filedialog.askdirectory(title="Chọn nơi lưu dự án")
@@ -453,17 +510,12 @@ class KhiemYoutube:
             target.mkdir(parents=True, exist_ok=True)
             for dirname in folders.values():
                 (target / dirname).mkdir(exist_ok=True)
-            self.vars["name"].set(self.creator_name.get().strip())
-            self.vars["project_folder"].set(str(target))
-            for key, dirname in folders.items():
-                self.vars[key].set(str(target / dirname))
-            self.interview_enabled.set(False)
-            self.save_settings()
-            self.tabs.select(self.project_tab)
-            self.log("TẠO DỰ ÁN: " + str(target))
+            self.creator_refresh()
+            self.creator_selected.set(target.name)
+            self.log("Đã tạo thư mục dự án: " + str(target))
             messagebox.showinfo("Đã tạo dự án",
-                "Đã tạo thư mục và điền đường dẫn vào Tab 01.\\n"
-                "Hãy chép Voice, TXT, ảnh, video và Interview vào từng thư mục.")
+                "Đã tạo bộ thư mục. Tab 01 chưa thay đổi.\\n"
+                "Khi cần dựng, chọn dự án trong danh sách và bấm ĐIỀN VÀO TAB 01.")
         except (OSError, ValueError) as exc:
             messagebox.showerror("Không thể tạo dự án", str(exc))
 
