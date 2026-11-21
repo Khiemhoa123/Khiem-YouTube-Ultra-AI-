@@ -67,9 +67,9 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V11.1 | ULTRA AI STUDIO")
-        self.root.geometry("1180x800")
-        self.root.minsize(900, 600)
+        self.root.title("KHIEM YOUTUBE V11.2 | ULTRA AI STUDIO")
+        self.root.geometry("1440x900")
+        self.root.minsize(1000, 650)
         self.root.configure(bg=COLORS["bg"])
 
         self.settings_file = (
@@ -209,7 +209,7 @@ class KhiemYoutube:
             "TNotebook.Tab",
             background=c["panel"],
             foreground=c["muted"],
-            padding=(24, 12),
+            padding=(36, 12),
             font=("Segoe UI", 11, "bold")
         )
         style.map(
@@ -312,21 +312,14 @@ class KhiemYoutube:
 
         tk.Label(
             header,
-            text="V11.1 ULTRA AI STUDIO  |  SMART VIDEO BALANCE",
+            text="ULTRA AI STUDIO  v11.2",
             bg=COLORS["bg"],
             fg=COLORS["accent"],
             font=("Segoe UI", 10)
         ).pack(anchor="w")
 
-        self.hardware_status = tk.StringVar(value="CPU / RAM / GPU: đang đọc...")
-        self.balance_status = tk.StringVar(value="Mục tiêu video: 60% | Tối đa 3 ảnh liên tiếp")
-        dashboard = tk.Frame(header, bg=COLORS["panel"], padx=12, pady=8)
-        dashboard.pack(fill="x", pady=(10, 0))
-        tk.Label(dashboard, textvariable=self.hardware_status, bg=COLORS["panel"],
-                 fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        tk.Label(dashboard, textvariable=self.balance_status, bg=COLORS["panel"],
-                 fg=COLORS["accent"], font=("Segoe UI", 10)).pack(anchor="w")
-        self.sample_hardware()
+        self.balance_status = tk.StringVar(value="Chưa có kết quả")
+        self.scene_status = tk.StringVar(value="Chưa lập timeline")
 
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(
@@ -364,27 +357,6 @@ class KhiemYoutube:
         self.build_export()
         self.build_queue()
 
-
-    def sample_hardware(self):
-        # Optional monitoring; no mandatory dependency or GPU subprocess.
-        try:
-            import psutil
-            cpu = psutil.cpu_percent(interval=None)
-            ram = psutil.virtual_memory()
-            status = f"CPU {cpu:.0f}%   |   RAM {ram.used/2**30:.1f}/{ram.total/2**30:.1f} GB"
-        except Exception:
-            status = "CPU / RAM: cần psutil để hiển thị"
-        try:
-            import pynvml
-            if not getattr(self, "_nvml_ready", False):
-                pynvml.nvmlInit()
-                self._nvml_ready = True
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            status += f"   |   GPU {pynvml.nvmlDeviceGetUtilizationRates(handle).gpu}%"
-        except Exception:
-            status += "   |   GPU: chưa có số liệu"
-        self.hardware_status.set(status)
-        self.root.after(3000, self.sample_hardware)
 
     def heading(self, parent, title):
         ttk.Label(
@@ -462,53 +434,82 @@ class KhiemYoutube:
         ).pack(side="right")
 
     def build_project(self):
-        self.heading(
-            self.project_tab,
-            "Thiết lập dự án"
-        )
+        # Three-column studio dashboard, with all existing path settings.
+        self.project_tab.configure(padding=10)
+        body = tk.Canvas(self.project_tab, bg=COLORS["bg"], highlightthickness=0)
+        scroll = ttk.Scrollbar(self.project_tab, orient="vertical", command=body.yview)
+        body.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        body.pack(fill="both", expand=True)
+        shell = ttk.Frame(body, padding=6)
+        win = body.create_window((0, 0), window=shell, anchor="nw")
+        shell.bind("<Configure>", lambda e: body.configure(scrollregion=body.bbox("all")))
+        body.bind("<Configure>", lambda e: body.itemconfigure(win, width=e.width))
+        for col, weight in enumerate((3, 5, 3)):
+            shell.columnconfigure(col, weight=weight, uniform="studio")
 
-        self.field(
-            self.project_tab,
-            "name",
-            "Tên dự án"
-        )
+        def panel(col, title):
+            frame = tk.Frame(shell, bg=COLORS["panel"], highlightbackground="#334A60",
+                             highlightthickness=1, padx=12, pady=10)
+            frame.grid(row=0, column=col, sticky="nsew", padx=5, pady=5)
+            tk.Label(frame, text=title, bg=COLORS["panel"], fg=COLORS["accent"],
+                     font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+            return frame
 
-        self.folder_field(self.project_tab, "project_folder", "THƯ MỤC CHUNG (tự nhận dạng)")
-        ttk.Label(self.project_tab, text="Có thư mục chung: tự ghép Voice/TXT theo số, AI dùng toàn bộ ảnh/video.",
-                  foreground=COLORS["muted"]).pack(anchor="w", pady=(0, 8))
+        left = panel(0, "DỰ ÁN HIỆN TẠI")
+        ttk.Label(left, text="Tên dự án").pack(anchor="w")
+        ttk.Entry(left, textvariable=self.vars["name"]).pack(fill="x", pady=(2, 6))
+        for key, label in (
+            ("project_folder", "Thư mục chung (tự nhận dạng)"),
+            ("txt", "Kịch bản TXT"), ("voice", "Voice MP3"),
+            ("images", "Thư mục ảnh"), ("videos", "Thư mục video"),
+            ("interview_folder", "Interview (tùy chọn)"),
+            ("out", "Nơi xuất kết quả"), ("draft_root", "Thư mục CapCut"),
+            ("sample", "Mẫu CapCut tùy chọn")):
+            ttk.Label(left, text=label).pack(anchor="w")
+            line = ttk.Frame(left)
+            line.pack(fill="x", pady=(2, 5))
+            ttk.Entry(line, textvariable=self.vars[key], width=12).pack(side="left", fill="x", expand=True)
+            def browse(k=key):
+                folder = filedialog.askdirectory()
+                if folder:
+                    self.vars[k].set(folder)
+            ttk.Button(line, text="…", width=3, command=browse).pack(side="right", padx=(4, 0))
 
-        folders = [
-            ("voice", "Thư mục Voice MP3"),
-            ("interview_folder", "Thư mục video phỏng vấn"),
-            ("txt", "Thư mục TXT"),
-            ("images", "Thư mục ảnh"),
-            ("videos", "Thư mục video"),
-            ("out", "Nơi xuất kết quả"),
-            ("draft_root", "Thư mục CapCut"),
-            ("sample", "Mẫu CapCut tùy chọn")
-        ]
+        center = panel(1, "ULTRA AI STUDIO")
+        banner = tk.Frame(center, bg="#092B43", padx=12, pady=24)
+        banner.pack(fill="x", pady=(0, 16))
+        tk.Label(banner, text="DỰNG VIDEO TỰ ĐỘNG", bg="#092B43",
+                 fg="#EAF8FF", font=("Segoe UI", 16, "bold")).pack()
+        tk.Label(banner, text="Kịch bản  •  Tư liệu  •  Timeline  •  CapCut",
+                 bg="#092B43", fg=COLORS["accent"], wraplength=300).pack(pady=8)
+        self.heading(center, "Tùy chọn dựng")
+        ttk.Label(center, text="Video 5–8 giây  |  Ảnh 4–6 giây").pack(anchor="w", pady=5)
+        ttk.Label(center, text="Smart Timeline: tối đa 3 ảnh nếu có video phù hợp",
+                  wraplength=280).pack(anchor="w", pady=5)
+        for label, var in (("Sử dụng Interview nếu phù hợp", self.interview_enabled),
+                           ("AI CLIP offline", self.ai), ("Whisper voice", self.align),
+                           ("NVIDIA NVENC", self.gpu)):
+            ttk.Checkbutton(center, text=label, variable=var).pack(anchor="w", pady=4)
+        ttk.Label(center, text="Intro tối đa (giây)").pack(anchor="w")
+        ttk.Entry(center, textvariable=self.vars["interview_max_seconds"]).pack(fill="x", pady=4)
+        ttk.Button(center, text="Cài đặt biên tập chi tiết",
+                   command=lambda: self.tabs.select(self.editor_tab)).pack(fill="x", pady=8)
+        button = ttk.Button(center, text="▶  BẮT ĐẦU DỰNG VIDEO", style="Accent.TButton",
+                            command=lambda: self.start("capcut"))
+        button.pack(fill="x", pady=(16, 6))
+        self.buttons.append(button)
 
-        ttk.Checkbutton(self.project_tab, text="Bật SMART INTERVIEW INTRO (giữ tiếng gốc)", variable=self.interview_enabled).pack(anchor="w", pady=5)
-        self.field(self.project_tab, "interview_max_seconds", "Intro tối đa (giây)")
-
-        for key, label in folders:
-            self.folder_field(
-                self.project_tab,
-                key,
-                label
-            )
-
-        ttk.Label(
-            self.project_tab,
-            text=(
-                "Giữ nguyên cách tổ chức "
-                "thư mục tư liệu của V6.8."
-            ),
-            foreground=COLORS["muted"]
-        ).pack(
-            anchor="w",
-            pady=20
-        )
+        right = panel(2, "THÔNG TIN DỰ ÁN")
+        ttk.Label(right, textvariable=self.vars["name"], font=("Segoe UI", 12, "bold"),
+                  wraplength=200).pack(anchor="w", pady=8)
+        ttk.Label(right, textvariable=self.run_stage, wraplength=200).pack(anchor="w", pady=8)
+        ttk.Separator(right).pack(fill="x", pady=12)
+        self.heading(right, "Kết quả sau khi dựng")
+        for var in (self.run_elapsed, self.scene_status, self.balance_status):
+            ttk.Label(right, textvariable=var, wraplength=200).pack(anchor="w", pady=8)
+        ttk.Progressbar(right, variable=self.progress, maximum=100).pack(fill="x", pady=10)
+        ttk.Button(right, text="Mở thư mục xuất", command=self.open_output).pack(fill="x", pady=8)
 
     def build_editor(self):
         # Scrollable editor: works on smaller displays and with mouse wheel.
@@ -727,16 +728,15 @@ class KhiemYoutube:
         ttk.Label(self.export_tab, textvariable=self.run_stage,
                   wraplength=700).pack(anchor="w", pady=(0, 8))
 
-        ttk.Label(
-            self.export_tab,
-            text="Nhật ký hoạt động"
-        ).pack(
-            anchor="w",
-            pady=(8, 5)
-        )
-
+        self.log_panel = ttk.Frame(self.root, padding=(12, 6))
+        self.log_panel.pack(fill="x", padx=20, pady=(0, 12))
+        log_header = ttk.Frame(self.log_panel)
+        log_header.pack(fill="x")
+        ttk.Label(log_header, text="NHẬT KÝ XỬ LÝ", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Button(log_header, text="Xóa nhật ký", command=lambda: self.log_box.delete("1.0", "end")).pack(side="right")
         self.log_box = tk.Text(
-            self.export_tab,
+            self.log_panel,
+            height=6,
             bg="#0D141E",
             fg="#DDE9F5",
             insertbackground="white",
@@ -1228,7 +1228,10 @@ class KhiemYoutube:
             total = sum(float(z["duration"]) for p in parts for z in p["clips"])
             video = sum(float(z["duration"]) for p in parts for z in p["clips"] if z["type"] == "video")
             percent = 100 * video / max(total, 0.001)
-            self.root.after(0, lambda: self.balance_status.set(f"Timeline thực tế: VIDEO {percent:.1f}% | ẢNH {100-percent:.1f}%"))
+            vc = sum(z["type"] == "video" for p in parts for z in p["clips"])
+            ac = sum(z["type"] == "image" for p in parts for z in p["clips"])
+            self.root.after(0, lambda: self.balance_status.set(f"Video {percent:.1f}% | Ảnh {100-percent:.1f}%"))
+            self.root.after(0, lambda: self.scene_status.set(f"{len(parts)} phần | {vc} video | {ac} ảnh"))
 
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
