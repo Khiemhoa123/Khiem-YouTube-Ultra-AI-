@@ -735,6 +735,7 @@ class KhiemYoutube:
         ttk.Button(top, text="KIỂM TRA TẤT CẢ", command=self.queue_precheck_all).pack(side="left", padx=4)
         ttk.Button(top, text="CHẠY HÀNG ĐỢI", style="Accent.TButton",
                    command=self.queue_start).pack(side="left", padx=4)
+        ttk.Button(top, text="RESET HÀNG ĐỢI", command=self.queue_reset_all).pack(side="left", padx=4)
         ttk.Button(top, text="Dừng sau dự án hiện tại",
                    command=self.queue_stop).pack(side="left", padx=4)
         self.queue_list = ttk.Treeview(self.queue_tab, columns=("name", "mode", "status", "time"),
@@ -761,6 +762,8 @@ class KhiemYoutube:
                    command=self.queue_edit).pack(side="left", padx=4)
         ttk.Button(controls, text="Xóa dự án đã chọn",
                    command=self.queue_delete).pack(side="left", padx=4)
+        ttk.Button(controls, text="Reset dự án", command=self.queue_reset_selected).pack(side="left", padx=4)
+        ttk.Button(controls, text="Xóa đã hoàn thành", command=self.queue_clear_completed).pack(side="left", padx=4)
         ttk.Button(controls, text="Xem lỗi",
                    command=self.queue_error).pack(side="left", padx=4)
         ttk.Checkbutton(self.queue_tab, text="Tắt Windows khi hàng đợi hoàn tất (tùy chọn)",
@@ -896,6 +899,67 @@ class KhiemYoutube:
             self.queue.jobs.remove(job)
             self.queue.save()
             self.queue_refresh()
+
+    def queue_reset_allowed(self):
+        if self.busy or self.queue_running or any(j.get("status") == "running" for j in self.queue.jobs):
+            messagebox.showwarning("Hàng đợi đang chạy",
+                                   "Hãy chờ dự án hiện tại kết thúc và dừng hàng đợi trước khi reset.")
+            return False
+        return True
+
+    def queue_reset_job_state(self, job):
+        job.update(status="pending", error="", precheck=None,
+                   started=None, finished=None, elapsed=0)
+
+    def queue_reset_all(self):
+        if not self.queue_reset_allowed():
+            return
+        if not self.queue.jobs:
+            messagebox.showinfo("RESET HÀNG ĐỢI", "Hàng đợi đang trống.")
+            return
+        if not messagebox.askyesno("RESET HÀNG ĐỢI",
+                "Đặt lại trạng thái toàn bộ %d dự án về CHỜ?\\n"
+                "Giữ nguyên danh sách, cấu hình và mọi file nguồn/đầu ra." % len(self.queue.jobs)):
+            return
+        for job in self.queue.jobs:
+            self.queue_reset_job_state(job)
+        self.queue.save()
+        self.queue_refresh()
+        self.log("Đã reset %d dự án về trạng thái CHỜ." % len(self.queue.jobs))
+
+    def queue_reset_selected(self):
+        if not self.queue_reset_allowed():
+            return
+        job = self.queue_selected()
+        if not job:
+            messagebox.showinfo("Reset dự án", "Hãy chọn một dự án trong bảng.")
+            return
+        if not messagebox.askyesno("Reset dự án",
+                "Đặt lại dự án '%s' về CHỜ?\\nKhông xóa file nguồn hoặc file đã xuất." % job["name"]):
+            return
+        self.queue_reset_job_state(job)
+        self.queue.save()
+        self.queue_refresh()
+        self.log("Đã reset dự án: " + job["name"])
+
+    def queue_clear_completed(self):
+        if not self.queue_reset_allowed():
+            return
+        completed = [j for j in self.queue.jobs if j.get("status") == "success"]
+        if not completed:
+            messagebox.showinfo("Dọn hàng đợi", "Không có dự án hoàn thành cần xóa.")
+            return
+        if not messagebox.askyesno("Xóa dự án đã hoàn thành",
+                "Xóa %d dự án HOÀN THÀNH khỏi danh sách hàng đợi?\\n"
+                "Không xóa file nguồn, bản CapCut hoặc MP4 đã xuất." % len(completed)):
+            return
+        ids = {j["id"] for j in completed}
+        self.queue.jobs = [j for j in self.queue.jobs if j["id"] not in ids]
+        if self.editing_job_id in ids:
+            self.editing_job_id = None
+        self.queue.save()
+        self.queue_refresh()
+        self.log("Đã dọn %d dự án hoàn thành khỏi hàng đợi." % len(completed))
 
     def queue_error(self):
         job = self.queue_selected()
