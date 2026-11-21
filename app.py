@@ -140,6 +140,8 @@ def plan(c, log):
     else:
         voices = indexed(c['voice'], A)
         scripts = indexed(c['txt'], {'.txt'})
+    from smart_script_first_v12 import prepare as prepare_story, score_media, query_at
+    story = prepare_story(scripts, log)
     fps = int(c['fps'])
 
     # Stable selection for identical inputs, useful for repeatable CapCut edits.
@@ -200,9 +202,7 @@ def plan(c, log):
     for n, p in sorted(voices.items()):
         dur = duration_cached(p)
 
-        script = scripts[n].read_text(
-            encoding='utf-8-sig'
-        )
+        script = story["sections"][n]["text"]
         tokens = script.split()
 
         pools = {}
@@ -355,6 +355,8 @@ def plan(c, log):
                             pass
                     label_cache[src] = words(label)
                 score = len(context & label_cache[src])
+                # Script-first ranking: prefer the actual narrated topic and named person.
+                score += score_media(query, src, story, n, ' '.join(label_cache[src]))
 
                 # Existing CLIP scoring
                 if ai:
@@ -478,12 +480,7 @@ def plan(c, log):
                     / max(target, 1)
                 )
 
-                query = ' '.join(
-                    tokens[
-                        max(0, mid - 18):
-                        mid + 18
-                    ]
-                )
+                query = query_at(story["sections"][n], (pos + nf / 2) / max(target, 1))
 
                 spoken = ' '.join(
                     w for a, b, w in aligned
