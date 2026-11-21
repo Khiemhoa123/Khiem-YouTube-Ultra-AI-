@@ -89,6 +89,74 @@ def export(c,parts,log):
   clips=p['clips']
   for i,s in enumerate(clips):
    start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round((clips[i+1]['start']+float(intro['duration']) if intro else clips[i+1]['start'])*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
+
+ # Add native editable Vietnamese subtitle track using the user-provided CapCut schema.
+ subtitle_path=Path(c['out'])/'_vietsub_review'/(c['name']+'.vi.srt')
+ if subtitle_path.is_file():
+  try:
+   import re
+   ref=read(Path(__file__).resolve().parent/'capcut_v11_reference.json')
+   text_track=copy.deepcopy(ref['text_track']); text_track.update(id=uid(),segments=[])
+   def stamp(value):
+    h,m,tail=value.replace('.',',').split(':')
+    sec,ms=tail.split(',')
+    return (int(h)*3600+int(m)*60+int(sec))*1000000+int(ms.ljust(3,'0')[:3])*1000
+   raw_srt=subtitle_path.read_text(encoding='utf-8-sig')
+   for block in re.split(r'\\n\\s*\\n',raw_srt.strip()):
+    lines=block.strip().splitlines()
+    times=next((line for line in lines if ' --> ' in line),None)
+    if not times:continue
+    idx=lines.index(times); start_text,end_text=times.split(' --> ',1)
+    start_us=stamp(start_text.strip()); end_us=stamp(end_text.strip().split()[0])
+    if end_us<=start_us:continue
+    caption='\\n'.join(lines[idx+1:]).strip()
+    if not caption:continue
+    mat=copy.deepcopy(ref['text_material']); mat['id']=uid()
+    mat['name']='VIETSUB KIEM TRA'
+    rich=json.loads(mat['content']); rich['text']=caption
+    for style in rich.get('styles',[]):
+     style['range']=[0,len(caption)]
+     style.get('font',{}).pop('path',None)
+    mat['content']=json.dumps(rich,ensure_ascii=False)
+    mat['base_content']=mat['content']
+    mat['recognize_text']=caption
+    mat['words']=[]
+    mat['current_words']=[]
+    mts['texts'].append(mat)
+    seg=copy.deepcopy(ref['text_segment']);seg['id']=uid();seg['material_id']=mat['id']
+    seg['extra_material_refs']=[]
+    seg['target_timerange']={'start':start_us,'duration':end_us-start_us}
+    seg['render_index']=14000+len(text_track['segments'])
+    text_track['segments'].append(seg)
+   if text_track['segments']:
+    tracks['vietsub']=text_track
+    log('CapCut: đã chèn '+str(len(text_track['segments']))+' đoạn Vietsub native chỉnh sửa được')
+  except Exception as exc:
+   log('VIETSUB: Không thể chèn text track, giữ SRT để nhập thủ công: '+str(exc))
+ # Safe native fade transition. No overlap or time shifts, never on interview.
+ if str(c.get('transition','')).lower() not in ('không','none','off','cut','tắt'):
+  try:
+   ref=read(Path(__file__).resolve().parent/'capcut_v11_reference.json')
+   fade=next(t for t in ref['transitions'] if t['name']=='Mờ đen')
+   video_segments=tracks['video']['segments']
+   video_segments.sort(key=lambda x:x['target_timerange']['start'])
+   added=0
+   for prev,cur in zip(video_segments,video_segments[1:]):
+    left=prev['target_timerange'];right=cur['target_timerange']
+    if left['start']+left['duration']!=right['start']:continue
+    if min(left['duration'],right['duration'])<1200000:continue
+    if intro and right['start']<=round(float(intro['duration'])*1e6):continue
+    # Limit effects to every third eligible boundary, avoiding visual overload.
+    if added%3!=0:
+     added+=1;continue
+    transition=copy.deepcopy(fade);transition['id']=uid()
+    transition['duration']=min(466666,left['duration']//4,right['duration']//4)
+    mts['transitions'].append(transition)
+    cur.setdefault('extra_material_refs',[]).append(transition['id'])
+    added+=1
+   log('CapCut: đã thêm chuyển cảnh native không chồng thời gian tại các điểm phù hợp')
+  except Exception as exc:
+   log('CapCut: bỏ qua transition chưa tương thích: '+str(exc))
  for track in tracks.values(): track['segments'].sort(key=lambda seg: (seg['target_timerange']['start'],seg['id']))
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
  meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for _,p in seen)); meta['draft_materials'][0]['value']=entries
@@ -102,4 +170,4 @@ def export(c,parts,log):
   if (dest/'draft_cover.jpg').exists():shutil.copyfile(dest/'draft_cover.jpg',dt/'draft_cover.jpg')
  except Exception:
   shutil.rmtree(dest,ignore_errors=True); raise
- log('Đã ghi dự án: '+str(dest)+' | Mở lại CapCut để kiểm tra. Chuyển cảnh native chưa hỗ trợ.'); return dest
+ log('Đã ghi dự án: '+str(dest)+' | Mở lại CapCut để kiểm tra. Chuyển cảnh và Vietsub native thử nghiệm; kiểm tra CapCut trước khi xuất.'); return dest
