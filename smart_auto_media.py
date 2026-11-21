@@ -1,5 +1,8 @@
 """Independent Wikimedia Commons media downloader. No renderer imports."""
 import time
+from urllib.error import HTTPError
+from urllib.parse import quote_plus
+import webbrowser
 import json
 import math
 import re
@@ -97,15 +100,42 @@ def plan(key, voice_root=None, images=20, videos=5, script_root=None, log=lambda
         g["video_target"]=videos
     return groups
 
-def search(query, kind):
+class RateLimited(RuntimeError):
+    pass
+
+_search_cache = {}
+_next_request = 0.0
+
+def request_json(url, stop):
+    global _next_request
+    for attempt in range(3):
+        if stop.wait(max(0, _next_request-time.monotonic())):
+            return {}
+        _next_request=time.monotonic()+2.0
+        try:
+            with urlopen(Request(url,headers={"User-Agent":UA}),timeout=25) as r:
+                return json.load(r)
+        except HTTPError as e:
+            if e.code != 429:
+                raise
+            try: delay=max(15,int(e.headers.get("Retry-After","30")))
+            except ValueError: delay=60
+            _next_request=time.monotonic()+delay
+            raise RateLimited(f"HTTP 429: tạm dừng Commons {delay}s; chạy lại sau.")
+    return {}
+
+def search(query, kind, stop):
     params = {"action":"query","format":"json","generator":"search","gsrnamespace":6,
         "gsrsearch":query + (" filetype:bitmap" if kind=="image" else " filetype:video"),
         "gsrlimit":20,"prop":"imageinfo","iiprop":"url|size|mime|extmetadata|sha1"}
-    with urlopen(Request(API+"?"+urlencode(params),headers={"User-Agent":UA}),timeout=25) as r:
-        data=json.load(r)
+    cache_key=(query,kind)
+    if cache_key in _search_cache: return list(_search_cache[cache_key])
+    data=request_json(API+"?"+urlencode(params),stop)
     if "error" in data:
         raise RuntimeError(str(data["error"]))
-    return sorted(data.get("query",{}).get("pages",{}).values(),key=lambda p:p.get("index",999))
+    pages=sorted(data.get("query",{}).get("pages",{}).values(),key=lambda p:p.get("index",999))
+    _search_cache[cache_key]=pages
+    return list(pages)
 
 def download(page, folder, kind, known, stop):
     info=page.get("imageinfo",[{}])[0]
@@ -155,6 +185,18 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
     log('Đang đọc KEY: '+key.name)
     timeline=plan(key, voice_root, image_count, video_count, script_root, log)
     log(f'Đã đọc {len(timeline)} phần. Đang kiểm tra tư liệu có sẵn.')
+    # Search links are for human review, not automatic downloads from restricted sites.
+    links=["<meta charset='utf-8'><title> Tìm tư liệu </title>"]
+    for part in timeline:
+        links.append("<h2>"+html.escape(str(part["number"])+" "+part["title"])+"</h2>")
+        for q in part["queries"]:
+            x=quote_plus(q)
+            links.append("<p>"+html.escape(q)+" | "+" | ".join(
+                '<a target="_blank" rel="noopener" href="'+html.escape(u,quote=True)+'">'+label+'</a>'
+                for label,u in [("Google Images","https://www.google.com/search?tbm=isch&q="+x),("Bing Images","https://www.bing.com/images/search?q="+x),("Getty","https://www.gettyimages.com/photos/"+x.replace("+","-")),("YouTube","https://www.youtube.com/results?search_query="+x)])+"</p>")
+    (root/"_media_search.html").write_text("\n".join(links),encoding="utf-8")
+    log("Đã lưu _media_search.html: liên kết đa nguồn để kiểm tra và chọn tư liệu có quyền sử dụng.")
+    commons_blocked=False
     (root/"_media_plan.json").write_text(json.dumps(timeline,ensure_ascii=False,indent=2),encoding="utf-8")
     known=set()
     for p in root.rglob("*"):
@@ -182,12 +224,21 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
         d=part["duration"]
         log(f"Phần {n:02d}: {part['title']} | {d if d is not None else 'Không có Voice'} | {images} ảnh, {videos} cảnh video ước tính")
         def fill(kind,need):
+            nonlocal commons_blocked
             added=0
-            for q in part["queries"]:
+            if commons_blocked: return 0
+            title=part["title"]
+            person=title.split("|")[-1].strip() if "|" in title else ""
+            queries=list(dict.fromkeys(([person] if person else [])+part["queries"]))
+            for q in queries:
                 if stop.is_set() or added>=need: break
                 log("Tìm "+kind+": "+q)
                 try:
-                    pages=search(q,kind)
+                    pages=search(q,kind,stop)
+                except RateLimited as e:
+                    log(str(e))
+                    commons_blocked=True
+                    break
                 except Exception as e:
                     log("Lỗi tìm kiếm: "+str(e))
                     continue
@@ -201,11 +252,19 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
                 for page in pages:
                     if stop.is_set() or added>=need: break
                     try:
+                        if person and not all(w in (page.get("title","")+" "+str(page.get("imageinfo",[]))).casefold() for w in person.casefold().split()):
+                            continue
                         log("Kiểm tra ứng viên: "+page.get("title",""))
                         p=download(page,folder,kind,known,stop)
                         if p:
                             added+=1
                             log("Đã tải: "+p.name)
+                    except HTTPError as e:
+                        if e.code==429:
+                            commons_blocked=True
+                            log("HTTP 429 khi tải: dừng Commons, giữ tư liệu đã tải.")
+                            return added
+                        log("Bỏ qua: "+str(e))
                     except (OSError,ValueError) as e: log("Bỏ qua: "+str(e))
             return added
         if mode!="image":
@@ -215,7 +274,7 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
             target=part["image_target"] if d is None else min(120,math.ceil(max(0,d-(videos*8 if mode=="both" else 0))/6*1.15))
             images+=fill("image",max(0,target-images))
         log("Phần %02d: %d ảnh, %d cảnh video ước tính. Cần xem lại đúng nhân vật và quyền sử dụng."%(n,images,videos))
-    log("Hoàn thành tìm tải. Có thể thiếu tư liệu nếu nguồn không có kết quả phù hợp.")
+    log("Dừng do giới hạn Commons. Mở danh sách tìm kiếm để bổ sung." if commons_blocked else "Hoàn thành tìm tải. Kiểm tra số lượng thực tế từng phần.")
 
 def add_tab(notebook):
     frame=ttk.Frame(notebook,padding=12)
@@ -278,6 +337,11 @@ def add_tab(notebook):
         threading.Thread(target=worker,daemon=True).start()
     button=ttk.Button(buttons,text="BẮT ĐẦU TẢI",command=start);button.pack(side="left")
     ttk.Button(buttons,text="DỪNG",command=stop.set).pack(side="left")
+    def open_links():
+        p=Path(path.get()).resolve()/"_media_search.html"
+        if p.is_file(): webbrowser.open(p.as_uri())
+        else: events.put("Chưa có danh sách tìm kiếm.")
+    ttk.Button(buttons,text="MỞ TÌM KIẾM ĐA NGUỒN",command=open_links).pack(side="left")
     def poll():
         while True:
             try: item=events.get_nowait()
