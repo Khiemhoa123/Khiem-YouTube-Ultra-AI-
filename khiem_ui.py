@@ -1145,7 +1145,7 @@ class KhiemYoutube:
                             source_manifest.append((str(item.relative_to(folder)),
                                                     field, stat.st_size, stat.st_mtime_ns))
             # Invalidate old timelines once after script-first planner upgrade.
-            fingerprint_fields["_planner_version"] = "smart_script_first_v12_1"
+            fingerprint_fields["_planner_version"] = "strict_folder_lock_v13"
             fingerprint = hashlib.sha256(json.dumps(
                 [fingerprint_fields, source_manifest], ensure_ascii=False,
                 sort_keys=True, default=str
@@ -1189,7 +1189,7 @@ class KhiemYoutube:
 
             if mode in ("render", "capcut") and config.get("_interview_intro"):
                 from smart_interview_intro import insert_interview_cutaways
-                parts = insert_interview_cutaways(parts, config["_interview_intro"], config, logger)
+                logger("FOLDER LOCK: Bỏ cutaway interview từ nguồn chung để không lấy chéo thư mục.")
 
             timeline = (
                 Path(config["out"])
