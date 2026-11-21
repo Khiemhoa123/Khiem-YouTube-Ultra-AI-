@@ -15,12 +15,12 @@ import app as engine
 
 
 COLORS = {
-    "bg": "#101722",
-    "panel": "#1B2635",
-    "input": "#29384B",
+    "bg": "#10141D",
+    "panel": "#1B2330",
+    "input": "#273548",
     "text": "#F2F6FC",
     "muted": "#AAB9CA",
-    "accent": "#22C8B8"
+    "accent": "#38BDF8"
 }
 
 DEFAULTS = {
@@ -67,8 +67,8 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V11 | SMART AI STUDIO")
-        self.root.geometry("1120x760")
+        self.root.title("KHIEM YOUTUBE V11.1 | ULTRA AI STUDIO")
+        self.root.geometry("1180x800")
         self.root.minsize(900, 600)
         self.root.configure(bg=COLORS["bg"])
 
@@ -309,11 +309,21 @@ class KhiemYoutube:
 
         tk.Label(
             header,
-            text="V10.1 ULTRA AI  |  SMART INTERVIEW",
+            text="V11.1 ULTRA AI STUDIO  |  SMART VIDEO BALANCE",
             bg=COLORS["bg"],
             fg=COLORS["accent"],
             font=("Segoe UI", 10)
         ).pack(anchor="w")
+
+        self.hardware_status = tk.StringVar(value="CPU / RAM / GPU: đang đọc...")
+        self.balance_status = tk.StringVar(value="Mục tiêu video: 60% | Tối đa 3 ảnh liên tiếp")
+        dashboard = tk.Frame(header, bg=COLORS["panel"], padx=12, pady=8)
+        dashboard.pack(fill="x", pady=(10, 0))
+        tk.Label(dashboard, textvariable=self.hardware_status, bg=COLORS["panel"],
+                 fg=COLORS["text"], font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        tk.Label(dashboard, textvariable=self.balance_status, bg=COLORS["panel"],
+                 fg=COLORS["accent"], font=("Segoe UI", 10)).pack(anchor="w")
+        self.sample_hardware()
 
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(
@@ -351,6 +361,27 @@ class KhiemYoutube:
         self.build_export()
         self.build_queue()
 
+
+    def sample_hardware(self):
+        # Optional monitoring; no mandatory dependency or GPU subprocess.
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=None)
+            ram = psutil.virtual_memory()
+            status = f"CPU {cpu:.0f}%   |   RAM {ram.used/2**30:.1f}/{ram.total/2**30:.1f} GB"
+        except Exception:
+            status = "CPU / RAM: cần psutil để hiển thị"
+        try:
+            import pynvml
+            if not getattr(self, "_nvml_ready", False):
+                pynvml.nvmlInit()
+                self._nvml_ready = True
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            status += f"   |   GPU {pynvml.nvmlDeviceGetUtilizationRates(handle).gpu}%"
+        except Exception:
+            status += "   |   GPU: chưa có số liệu"
+        self.hardware_status.set(status)
+        self.root.after(3000, self.sample_hardware)
 
     def heading(self, parent, title):
         ttk.Label(
@@ -713,6 +744,10 @@ class KhiemYoutube:
             relief="flat",
             wrap="word"
         )
+        self.log_box.tag_configure("warning", foreground="#FBBF24")
+        self.log_box.tag_configure("error", foreground="#F87171")
+        self.log_box.tag_configure("success", foreground="#4ADE80")
+        self.log_box.tag_configure("info", foreground="#DDE9F5")
         self.log_box.pack(
             fill="both",
             expand=True
@@ -986,10 +1021,11 @@ class KhiemYoutube:
             self.last_log_stage = message_text.strip().splitlines()[0] if message_text.strip() else ""
             if self.busy and message_text.strip():
                 self.run_stage.set("Đang xử lý: " + message_text.strip().splitlines()[0][:115])
-            self.log_box.insert(
-                "end",
-                time.strftime("[%H:%M:%S] ") + message_text + "\n"
-            )
+            upper = message_text.upper()
+            tag = ("warning" if "CẢNH BÁO" in upper else
+                   "error" if "LỖI" in upper else
+                   "success" if any(x in upper for x in ("HOÀN THÀNH", "THÀNH CÔNG", "HOÀN TẤT")) else "info")
+            self.log_box.insert("end", time.strftime("[%H:%M:%S] ") + message_text + "\n", tag)
             self.log_box.see("end")
 
         self.root.after(0, update)
@@ -1189,6 +1225,10 @@ class KhiemYoutube:
             from pre_export_qa_v11 import validate as validate_timeline
             logger("QA: Bắt đầu kiểm tra timeline.")
             validate_timeline(parts, config, logger)
+            total = sum(float(z["duration"]) for p in parts for z in p["clips"])
+            video = sum(float(z["duration"]) for p in parts for z in p["clips"] if z["type"] == "video")
+            percent = 100 * video / max(total, 0.001)
+            self.root.after(0, lambda: self.balance_status.set(f"Timeline thực tế: VIDEO {percent:.1f}% | ẢNH {100-percent:.1f}%"))
 
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
