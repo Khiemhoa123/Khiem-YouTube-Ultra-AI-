@@ -9,6 +9,7 @@ import re
 import traceback
 import time
 import shutil
+import tempfile
 from project_queue_v11 import ProjectQueue
 from queue_precheck_v11 import inspect as inspect_project
 
@@ -155,6 +156,10 @@ class KhiemYoutube:
                 lambda *_: self.save_settings()
             )
 
+        self.recovery_mode = ""
+        self.recovery_project = ""
+        self.recovery_last_stage = ""
+        self.root.after(600, self.recovery_check)
         self.root.protocol(
             "WM_DELETE_WINDOW", self.close
         )
@@ -200,17 +205,71 @@ class KhiemYoutube:
         return config
 
     def save_settings(self):
+        # Atomic replace avoids truncated JSON if power is lost mid-write.
         try:
-            self.settings_file.write_text(
-                json.dumps(
-                    self.get_config(),
-                    ensure_ascii=False,
-                    indent=2
-                ),
-                encoding="utf-8"
-            )
-        except OSError:
+            data = json.dumps(self.get_config(), ensure_ascii=False, indent=2)
+            self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp = tempfile.mkstemp(prefix=".settings_", suffix=".tmp",
+                                        dir=str(self.settings_file.parent))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp, self.settings_file)
+            finally:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+        except (OSError, TypeError, ValueError):
             pass
+
+    def recovery_write(self, state, stage=""):
+        # Status journal only. Do not claim frame-accurate rendering resume.
+        try:
+            payload = {"state": state, "stage": str(stage)[:240],
+                       "updated": time.time(), "mode": getattr(self, "recovery_mode", ""),
+                       "project": getattr(self, "recovery_project", "")}
+            target = self.settings_file.with_name("khiem_recovery.json")
+            fd, temp = tempfile.mkstemp(prefix=".recovery_", suffix=".tmp", dir=str(target.parent))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(payload, stream, ensure_ascii=False, indent=2)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp, target)
+            finally:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+        except (OSError, ValueError):
+            pass
+
+    def recovery_check(self):
+        target = self.settings_file.with_name("khiem_recovery.json")
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        interrupted = [j for j in self.queue.jobs if j.get("status") == "interrupted"]
+        if data.get("state") != "running" and not interrupted:
+            return
+        project = data.get("project") or (interrupted[0].get("name") if interrupted else "Dự án")
+        stage = data.get("stage") or "Không rõ giai đoạn"
+        self.log("AUTO RECOVERY: phát hiện phiên làm việc bị gián đoạn: " + str(project))
+        self.recovery_write("interrupted", stage)
+        if interrupted:
+            if messagebox.askyesno("AUTO RECOVERY", "Phát hiện %s dự án bị gián đoạn.\\n"
+                                   "Dự án: %s\\nBước gần nhất: %s\\n\\n"
+                                   "Chuyển các dự án này về trạng thái chờ để kiểm tra và chạy lại?\\n"
+                                   "Không tự tiếp tục tại giây render cũ." %
+                                   (len(interrupted), project, stage)):
+                for job in interrupted:
+                    self.queue.retry(job)
+                self.queue_refresh()
+                self.log("AUTO RECOVERY: đã đưa dự án gián đoạn về hàng chờ. Hãy kiểm tra trước khi chạy.")
+        else:
+            messagebox.showwarning("AUTO RECOVERY", "Phiên trước bị gián đoạn tại: %s\\n"
+                                   "Bước gần nhất: %s\\n"
+                                   "Vui lòng kiểm tra file đầu ra trước khi chạy lại." % (project, stage))
 
     def configure_style(self):
         c = COLORS
@@ -1588,6 +1647,9 @@ class KhiemYoutube:
             message_text = str(message)
             self.last_log_at = time.monotonic()
             self.last_log_stage = message_text.strip().splitlines()[0] if message_text.strip() else ""
+            if self.busy and self.last_log_stage and self.last_log_stage != getattr(self, "recovery_last_stage", ""):
+                self.recovery_last_stage = self.last_log_stage
+                self.recovery_write("running", self.last_log_stage)
             if self.busy and message_text.strip():
                 self.run_stage.set("Đang xử lý: " + message_text.strip().splitlines()[0][:115])
             upper = message_text.upper()
@@ -1685,6 +1747,10 @@ class KhiemYoutube:
                 messagebox.showerror("Lỗi", str(error))
             return
 
+        self.recovery_mode = mode
+        self.recovery_project = str(config.get("name", "Dự án"))
+        self.recovery_last_stage = "Chuẩn bị dự án"
+        self.recovery_write("running", "Chuẩn bị dự án")
         self.busy = True
         self.progress.set(0)
         self.run_started_at = time.monotonic()
@@ -1894,6 +1960,7 @@ class KhiemYoutube:
             elapsed = max(0, int(time.monotonic() - self.run_started_at))
             self.run_elapsed.set(f"Tổng thời gian: {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}")
         self.run_stage.set("Hoàn thành" if success else "Lỗi, xem nhật ký")
+        self.recovery_write("completed" if success else "failed", failure)
         self.busy = False
         if from_queue and self.active_job:
             self.queue.update(self.active_job, "success" if success else "failed", failure)
