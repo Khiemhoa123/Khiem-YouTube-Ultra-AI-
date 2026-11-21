@@ -407,7 +407,7 @@ class KhiemYoutube:
         row = ttk.Frame(channel)
         row.pack(fill="x")
         self.creator_channel_dropdown = ttk.Combobox(row, textvariable=self.creator_channel,
-                                                     state="readonly", width=38)
+                                                     state="normal", width=38)
         self.creator_channel_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "+ THÊM KÊNH", self.creator_show_add_channel, primary=True).pack(side="left", padx=(0, 6))
         self.studio_button(row, "SỬA KÊNH", self.creator_show_edit_channel).pack(side="left")
@@ -428,17 +428,62 @@ class KhiemYoutube:
         row = ttk.Frame(chooser)
         row.pack(fill="x")
         self.creator_dropdown = ttk.Combobox(row, textvariable=self.creator_selected,
-                                             state="readonly", width=40)
+                                             state="normal", width=40)
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 6))
         self.studio_button(row, "MỞ THƯ MỤC", self.creator_open_selected).pack(side="left", padx=(0, 6))
         self.studio_button(row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
+        self.creator_channel_dropdown.bind("<KeyRelease>", lambda event: self.creator_filter_combo(event, "channel"))
+        self.creator_dropdown.bind("<KeyRelease>", lambda event: self.creator_filter_combo(event, "project"))
+        self.creator_channel_dropdown.bind("<<ComboboxSelected>>", lambda _e: self.creator_on_channel_selected())
+        self.creator_dropdown.bind("<<ComboboxSelected>>", lambda _e: self.creator_on_project_selected())
+        self.creator_channel_dropdown.bind("<Return>", lambda _e: self.creator_choose_first("channel"))
+        self.creator_dropdown.bind("<Return>", lambda _e: self.creator_choose_first("project"))
         self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(),
                                                              self.creator_sync_edit(), self.creator_update_channel_path()))
         self.creator_name.trace_add("write", lambda *_: self.creator_update_preview())
         self.creator_refresh_channels()
         self.creator_sync_edit()
         self.creator_update_channel_path()
+
+    def creator_filter_combo(self, event, kind):
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            return
+        widget = self.creator_channel_dropdown if kind == "channel" else self.creator_dropdown
+        options = (sorted(self.creator_channels, key=str.casefold) if kind == "channel"
+                   else getattr(self, "creator_project_names", []))
+        query = widget.get().strip().casefold()
+        matches = [name for name in options if query in name.casefold()]
+        widget.configure(values=matches)
+        if matches and event.keysym not in ("Left", "Right", "Home", "End"):
+            try:
+                widget.event_generate("<Down>")
+            except tk.TclError:
+                pass
+
+    def creator_choose_first(self, kind):
+        widget = self.creator_channel_dropdown if kind == "channel" else self.creator_dropdown
+        matches = list(widget.cget("values"))
+        if not matches:
+            return
+        value = widget.get().strip()
+        chosen = next((x for x in matches if x.casefold() == value.casefold()), matches[0])
+        if kind == "channel":
+            self.creator_channel.set(chosen)
+            self.creator_on_channel_selected()
+        else:
+            self.creator_selected.set(chosen)
+        widget.icursor("end")
+
+    def creator_on_channel_selected(self):
+        if self.creator_channel.get() in self.creator_channels:
+            self.creator_refresh()
+            self.creator_update_preview()
+            self.creator_sync_edit()
+            self.creator_update_channel_path()
+
+    def creator_on_project_selected(self):
+        return
 
     def creator_update_channel_path(self):
         try:
@@ -635,6 +680,7 @@ class KhiemYoutube:
         try:
             base = self.creator_channel_path()
         except ValueError:
+            self.creator_project_names = []
             self.creator_dropdown.configure(values=[])
             self.creator_selected.set("")
             return
@@ -648,6 +694,7 @@ class KhiemYoutube:
                                key=str.casefold)
         except OSError:
             pass
+        self.creator_project_names = names
         self.creator_dropdown.configure(values=names)
         if self.creator_selected.get() not in names:
             self.creator_selected.set(names[0] if names else "")
