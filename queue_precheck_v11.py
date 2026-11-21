@@ -44,7 +44,7 @@ def inspect(config, mode, other_jobs=()):
     if voice and txt and len(voice) != len(txt):
         errors.append("Số file Voice (%d) khác TXT (%d)" % (len(voice), len(txt)))
     def index(path):
-        m = re.match(r"^\\s*(\\d+)", path.stem)
+        m = re.match(r"^\s*(\d+)(?=\D|$)", path.stem)
         return int(m.group(1)) if m else None
     for label, files in (("Voice", voice), ("TXT", txt)):
         numbers = [index(p) for p in files]
