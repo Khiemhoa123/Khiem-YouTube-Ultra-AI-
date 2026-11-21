@@ -1144,6 +1144,8 @@ class KhiemYoutube:
                             stat = item.stat()
                             source_manifest.append((str(item.relative_to(folder)),
                                                     field, stat.st_size, stat.st_mtime_ns))
+            # Invalidate old timelines once after script-first planner upgrade.
+            fingerprint_fields["_planner_version"] = "smart_script_first_v12_1"
             fingerprint = hashlib.sha256(json.dumps(
                 [fingerprint_fields, source_manifest], ensure_ascii=False,
                 sort_keys=True, default=str
