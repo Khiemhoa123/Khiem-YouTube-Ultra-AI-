@@ -356,7 +356,7 @@ def plan(c, log):
                     label_cache[src] = words(label)
                 score = len(context & label_cache[src])
                 # Script-first ranking: prefer the actual narrated topic and named person.
-                score += score_media(query, src, story, n, ' '.join(label_cache[src]))
+                score += score_media(query, src, story, n, src.stem.replace('_', ' ').replace('-', ' '))
 
                 # Existing CLIP scoring
                 if ai:
