@@ -1125,6 +1125,9 @@ class KhiemYoutube:
                 pass
 
         try:
+            if mode == "capcut":
+                from smart_vietsub_v11 import ensure_translation_dependency
+                ensure_translation_dependency(logger)
             # Sử dụng thuật toán V6.8.
             # Reuse a verified timeline when source files and editing settings
             # have not changed. The export mode is deliberately excluded.
