@@ -1155,7 +1155,7 @@ class KhiemYoutube:
                             source_manifest.append((str(item.relative_to(folder)),
                                                     field, stat.st_size, stat.st_mtime_ns))
             # Invalidate old timelines once after script-first planner upgrade.
-            fingerprint_fields["_planner_version"] = "strict_folder_lock_v13"
+            fingerprint_fields["_planner_version"] = "smart_video_balance_v14"
             fingerprint = hashlib.sha256(json.dumps(
                 [fingerprint_fields, source_manifest], ensure_ascii=False,
                 sort_keys=True, default=str
