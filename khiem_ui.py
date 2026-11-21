@@ -676,6 +676,11 @@ class KhiemYoutube:
             )
             self.buttons.append(button)
 
+        ttk.Button(
+            actions, text="CẬP NHẬT GITHUB",
+            command=self.open_safe_updater
+        ).pack(side="right", padx=(10, 0))
+
         ttk.Progressbar(
             self.export_tab,
             variable=self.progress,
@@ -945,6 +950,22 @@ class KhiemYoutube:
         self.active_job = job
         self.queue.update(job, "running")
         self.start(job["mode"], config_override=dict(job["config"]), from_queue=True)
+
+    def open_safe_updater(self):
+        if self.busy or self.queue_running:
+            messagebox.showwarning("Cập nhật", "Hãy đợi dự án và hàng đợi hoàn thành trước khi cập nhật.")
+            return
+        import subprocess
+        import sys
+        updater = Path(__file__).resolve().parent / "khiem_auto_update.py"
+        if not updater.is_file():
+            messagebox.showerror("Cập nhật", "Không tìm thấy khiem_auto_update.py trong thư mục phần mềm.")
+            return
+        try:
+            subprocess.Popen([sys.executable, str(updater)], cwd=str(updater.parent))
+            messagebox.showinfo("Cập nhật", "Cửa sổ cập nhật đã mở. Kiểm tra GitHub, chọn file, sau đó đóng Khiêm YouTube trước khi xác nhận cài đặt.")
+        except OSError as exc:
+            messagebox.showerror("Cập nhật", str(exc))
 
     def tick_run_timer(self):
         if not self.run_timer_active or self.run_started_at is None:
