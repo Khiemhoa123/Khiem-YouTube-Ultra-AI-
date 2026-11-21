@@ -468,6 +468,9 @@ def plan(c, log):
         goal_video = max(min_video, min(1.0, float(c.get('target_video_percent', 60)) / 100))
         video_frames = 0
         warned_shortage = False
+        image_streak = 0
+        ts['video'] = [5, 6, 7, 8]
+        ts['image'] = [4, 5, 6]
 
         while pos < target:
             preferred = pattern[len(clips) % len(pattern)]
@@ -519,6 +522,14 @@ def plan(c, log):
                 )
 
                 candidate = pick(kind, nf, context, query)
+                if kind == 'video' and not candidate:
+                    for seconds in (7, 6, 5):
+                        smaller = min(target - pos, seconds * fps)
+                        if smaller >= nf: continue
+                        candidate = pick(kind, smaller, context, query)
+                        if candidate:
+                            nf = smaller
+                            break
                 if candidate:
                     options.append((kind, nf, candidate))
                     if not smart_timeline:
@@ -548,7 +559,12 @@ def plan(c, log):
                     best_image is None or best_video[2][0] >= best_image[2][0] - 0.85
                 )
                 eligible = [o for o in options if o[0] != 'video' or video_relevant]
-                chosen = max(eligible or options, key=lambda o: o[2][0])
+                if video_relevant and (image_streak >= 3 or video_frames < goal_video * pos):
+                    chosen = best_video
+                else:
+                    chosen = max(eligible or options, key=option_score)
+                if image_streak >= 3 and chosen[0] == 'image':
+                    log(f'Phần {n}: vượt 3 ảnh liên tiếp do thiếu video phù hợp.')
                 kind, nf, selected = chosen
                 if need_video and not videos and not warned_shortage:
                     log(f'Phần {n}: thiếu video phù hợp, tiếp tục với ảnh.')
@@ -609,6 +625,9 @@ def plan(c, log):
             pos += nf
             if kind == 'video':
                 video_frames += nf
+                image_streak = 0
+            else:
+                image_streak += 1
 
         if smart_timeline:
             actual = 100 * video_frames / max(1, target)
