@@ -449,30 +449,30 @@ class KhiemYoutube:
             for child in widget.winfo_children():
                 bind_project_wheel(child)
 
-        for col, weight in enumerate((3, 5, 3)):
+        for col, weight in enumerate((5, 4, 3)):
             shell.columnconfigure(col, weight=weight, uniform="studio")
 
         def panel(col, title):
             frame = tk.Frame(shell, bg=COLORS["panel"], highlightbackground="#334A60",
-                             highlightthickness=1, padx=12, pady=10)
+                             highlightthickness=1, padx=8, pady=6)
             frame.grid(row=0, column=col, sticky="nsew", padx=5, pady=5)
             tk.Label(frame, text=title, bg=COLORS["panel"], fg=COLORS["accent"],
-                     font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+                     font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 5))
             return frame
 
         left = panel(0, "DỰ ÁN HIỆN TẠI")
         ttk.Label(left, text="Tên dự án").pack(anchor="w")
         ttk.Entry(left, textvariable=self.vars["name"]).pack(fill="x", pady=(2, 6))
         for key, label in (
-            ("project_folder", "Thư mục chung (tự nhận dạng)"),
+            ("project_folder", "Thư mục chung"),
             ("txt", "Kịch bản TXT"), ("voice", "Voice MP3"),
             ("images", "Thư mục ảnh"), ("videos", "Thư mục video"),
             ("interview_folder", "Interview (tùy chọn)"),
             ("out", "Nơi xuất kết quả"), ("draft_root", "Thư mục CapCut"),
             ("sample", "Mẫu CapCut tùy chọn")):
-            ttk.Label(left, text=label).pack(anchor="w")
             line = ttk.Frame(left)
-            line.pack(fill="x", pady=(2, 5))
+            line.pack(fill="x", pady=2)
+            ttk.Label(line, text=label, width=23).pack(side="left")
             ttk.Entry(line, textvariable=self.vars[key], width=12).pack(side="left", fill="x", expand=True)
             def browse(k=key):
                 folder = filedialog.askdirectory()
@@ -480,29 +480,18 @@ class KhiemYoutube:
                     self.vars[k].set(folder)
             ttk.Button(line, text="…", width=3, command=browse).pack(side="right", padx=(4, 0))
 
-        center = panel(1, "ULTRA AI STUDIO")
-        self.heading(center, "Thao tác nhanh")
-        ttk.Label(center, text="Video 5–8 giây  |  Ảnh 4–6 giây").pack(anchor="w", pady=5)
-        ttk.Label(center, text="Smart Timeline: tối đa 3 ảnh nếu có video phù hợp",
-                  wraplength=280).pack(anchor="w", pady=5)
-        for label, var in (("Sử dụng Interview nếu phù hợp", self.interview_enabled),
-                           ("AI CLIP offline", self.ai), ("Whisper voice", self.align),
-                           ("NVIDIA NVENC", self.gpu)):
-            ttk.Checkbutton(center, text=label, variable=var).pack(anchor="w", pady=4)
-        ttk.Label(center, text="Intro tối đa (giây)").pack(anchor="w")
-        ttk.Entry(center, textvariable=self.vars["interview_max_seconds"]).pack(fill="x", pady=4)
-        ttk.Button(center, text="Cài đặt biên tập chi tiết",
-                   command=lambda: self.tabs.select(self.editor_tab)).pack(fill="x", pady=8)
-        button = ttk.Button(center, text="XUẤT CAPCUT", style="Accent.TButton",
-                            command=lambda: self.start("capcut"))
-        button.pack(fill="x", pady=(16, 6))
-        self.buttons.append(button)
-        for label, mode in (("Kiểm tra tư liệu", "check"), ("Xuất MP4", "render")):
-            b = ttk.Button(center, text=label, command=lambda m=mode: self.start(m))
-            b.pack(fill="x", pady=2)
-            self.buttons.append(b)
-        ttk.Button(center, text="Thêm CapCut vào hàng đợi", command=lambda: self.queue_add("capcut")).pack(fill="x", pady=2)
-        ttk.Button(center, text="Thêm MP4 vào hàng đợi", command=lambda: self.queue_add("render")).pack(fill="x", pady=2)
+        center = panel(1, "THAO TÁC NHANH")
+        actions = ttk.Frame(center)
+        actions.pack(anchor="w", fill="x")
+        for i, (label, mode) in enumerate((("Xuất CapCut", "capcut"), ("Kiểm tra", "check"), ("Xuất MP4", "render"))):
+            button = ttk.Button(actions, text=label, width=13,
+                                style="Accent.TButton" if mode=="capcut" else "TButton",
+                                command=lambda m=mode: self.start(m))
+            button.grid(row=0, column=i, padx=2, pady=2, sticky="w")
+            self.buttons.append(button)
+        for i, (label, mode) in enumerate((("+ Đợi CapCut", "capcut"), ("+ Đợi MP4", "render"))):
+            ttk.Button(actions, text=label, width=13, command=lambda m=mode: self.queue_add(m)).grid(row=1,column=i,padx=2,pady=2,sticky="w")
+        ttk.Button(actions, text="Biên tập", width=13, command=lambda: self.tabs.select(self.editor_tab)).grid(row=1,column=2,padx=2,pady=2,sticky="w")
 
         right = panel(2, "THÔNG TIN DỰ ÁN")
         ttk.Label(right, textvariable=self.vars["name"], font=("Segoe UI", 12, "bold"),
@@ -642,6 +631,11 @@ class KhiemYoutube:
             if i == 3:
                 for j, (label, var) in enumerate([("NVENC", self.gpu), ("CLIP", self.ai), ("Whisper", self.align), *self.effects.items()]):
                     ttk.Checkbutton(card, text=label, variable=var).grid(row=2+j//2, column=j%2, sticky="w", pady=2)
+        intro = ttk.Frame(editor_body)
+        intro.grid(row=3,column=0,columnspan=2,sticky="w",padx=5,pady=2)
+        ttk.Checkbutton(intro,text="Interview nếu phù hợp",variable=self.interview_enabled).pack(side="left",padx=(0,8))
+        ttk.Label(intro,text="Intro tối đa (giây)").pack(side="left")
+        ttk.Entry(intro,textvariable=self.vars["interview_max_seconds"],width=5).pack(side="left",padx=5)
         ttk.Label(editor_body, text="CapCut: Mờ đen native; các hiệu ứng khác dành cho MP4.", wraplength=850).grid(row=2,column=0,columnspan=2,sticky="w",pady=4)
 
     def build_export(self):
