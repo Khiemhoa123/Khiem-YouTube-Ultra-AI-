@@ -49,8 +49,8 @@ def choose_intro(c, log):
         log("Không đọc được TXT mở đầu; ưu tiên đoạn phỏng vấn có tiếng.")
     model = None
     try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        from whisper_audio_fix_v11 import get_model, transcribe_media
+        model = get_model()
     except Exception as exc:
         log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
@@ -67,7 +67,7 @@ def choose_intro(c, log):
                 fallback.append((str(path), duration))
             if model is None:
                 continue
-            segments, _ = model.transcribe(str(path), vad_filter=True, beam_size=3)
+            segments, _ = transcribe_media(path, model=model, vad_filter=True, beam_size=3)
             rows = list(segments)
             # Sliding windows over complete Whisper segments. No mid-sentence cut.
             for i, first in enumerate(rows):
@@ -162,7 +162,7 @@ def insert_interview_cutaways(parts, intro, c, log):
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel("base", device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(source, vad_filter=True, beam_size=3)
+        segments, _ = transcribe_media(source, model=model, vad_filter=True, beam_size=3)
         rows = list(segments)
         del model
     except Exception as exc:
