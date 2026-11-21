@@ -385,7 +385,7 @@ class KhiemYoutube:
 
 
     def build_creator(self):
-        self.creator_tab = ttk.Frame(self.tabs, padding=22)
+        self.creator_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.creator_tab, text="04  TẠO DỰ ÁN")
         self.creator_registry_file = self.settings_file.with_name("khiem_channels.json")
         self.creator_channels = self.creator_load_channels()
@@ -397,55 +397,111 @@ class KhiemYoutube:
         self.creator_name = tk.StringVar(value="")
         self.creator_selected = tk.StringVar(value="")
         self.creator_preview = tk.StringVar(value="")
-        self.heading(self.creator_tab, "QUẢN LÝ KÊNH VÀ DỰ ÁN")
-        ttk.Label(self.creator_tab, text="Lưu kênh một lần. Sau đó chỉ chọn kênh, tạo dự án và điền Tab 01 khi cần.").pack(anchor="w", pady=(0, 12))
-        channel_panel = ttk.LabelFrame(self.creator_tab, text="KÊNH ĐÃ LƯU", padding=12)
-        channel_panel.pack(fill="x", pady=(0, 10))
-        ttk.Label(channel_panel, text="Chọn kênh").grid(row=0, column=0, sticky="w", pady=5)
-        self.creator_channel_dropdown = ttk.Combobox(channel_panel, textvariable=self.creator_channel, state="readonly")
-        self.creator_channel_dropdown.grid(row=0, column=1, sticky="ew", padx=8, pady=5)
-        channel_panel.columnconfigure(1, weight=1)
-        edit_panel = ttk.LabelFrame(self.creator_tab, text="TẠO KÊNH MỚI TỪ KÊNH ĐÃ CHỌN", padding=10)
-        edit_panel.pack(fill="x", pady=(0, 8))
-        edit_panel.columnconfigure(1, weight=1)
-        ttk.Label(edit_panel, text="Tên kênh mới").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Entry(edit_panel, textvariable=self.creator_edit_name).grid(row=0, column=1, sticky="ew", padx=8, pady=3)
-        ttk.Label(edit_panel, text="Thư mục cha").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Entry(edit_panel, textvariable=self.creator_edit_base).grid(row=1, column=1, sticky="ew", padx=8, pady=3)
-        self.studio_button(edit_panel, "CHỌN...", self.creator_choose_edit).grid(row=1, column=2, pady=3)
-        self.studio_button(edit_panel, "TẠO THƯ MỤC KÊNH MỚI", self.creator_edit_channel).grid(row=2, column=1, sticky="w", padx=8, pady=5)
-        new_panel = ttk.LabelFrame(self.creator_tab, text="THÊM KÊNH MỚI (CHỈ LÀM MỘT LẦN)", padding=12)
-        new_panel.pack(fill="x", pady=(0, 10))
-        new_panel.columnconfigure(1, weight=1)
-        ttk.Label(new_panel, text="Tên kênh mới").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(new_panel, textvariable=self.creator_new_channel).grid(row=0, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(new_panel, text="Nơi lưu kênh").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(new_panel, textvariable=self.creator_base).grid(row=1, column=1, sticky="ew", padx=8, pady=5)
-        self.studio_button(new_panel, "CHỌN...", self.creator_choose).grid(row=1, column=2, pady=5)
-        self.studio_button(new_panel, "LƯU KÊNH MỚI", self.creator_create_channel, primary=True).grid(row=2, column=1, sticky="w", padx=8, pady=6)
-        panel = ttk.LabelFrame(self.creator_tab, text="DỰ ÁN TRONG KÊNH ĐÃ CHỌN", padding=12)
-        panel.pack(fill="x", pady=(0, 10))
-        panel.columnconfigure(1, weight=1)
-        ttk.Label(panel, text="Tên dự án").grid(row=0, column=0, sticky="w", pady=5)
-        ttk.Entry(panel, textvariable=self.creator_name).grid(row=0, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(panel, text="Đường dẫn").grid(row=1, column=0, sticky="w", pady=5)
-        ttk.Label(panel, textvariable=self.creator_preview, wraplength=760).grid(row=1, column=1, columnspan=2, sticky="w", padx=8, pady=5)
-        actions = ttk.Frame(panel)
-        actions.grid(row=2, column=1, sticky="w", padx=8, pady=6)
-        self.studio_button(actions, "TẠO DỰ ÁN", self.creator_create, primary=True).pack(side="left", padx=(0, 8))
-        self.studio_button(actions, "MỞ THƯ MỤC", self.creator_open).pack(side="left")
-        chooser = ttk.LabelFrame(self.creator_tab, text="CHỌN DỰ ÁN ĐỂ DỰNG", padding=12)
+        self.creator_channel_path_text = tk.StringVar(value="")
+        self.heading(self.creator_tab, "QUẢN LÝ KÊNH & DỰ ÁN")
+        ttk.Label(self.creator_tab, text="Chọn kênh đã lưu, tạo dự án, sau đó chọn dự án để điền Tab 01.").pack(anchor="w", pady=(0, 10))
+
+        channel = ttk.LabelFrame(self.creator_tab, text="01  KÊNH YOUTUBE", padding=12)
+        channel.pack(fill="x", pady=(0, 10))
+        channel.columnconfigure(0, weight=1)
+        row = ttk.Frame(channel)
+        row.pack(fill="x")
+        self.creator_channel_dropdown = ttk.Combobox(row, textvariable=self.creator_channel,
+                                                     state="readonly", width=38)
+        self.creator_channel_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.studio_button(row, "+ THÊM KÊNH", self.creator_show_add_channel, primary=True).pack(side="left", padx=(0, 6))
+        self.studio_button(row, "SỬA KÊNH", self.creator_show_edit_channel).pack(side="left")
+        ttk.Label(channel, textvariable=self.creator_channel_path_text,
+                  foreground=COLORS["muted"]).pack(anchor="w", pady=(7, 0))
+
+        project = ttk.LabelFrame(self.creator_tab, text="02  TẠO DỰ ÁN", padding=12)
+        project.pack(fill="x", pady=(0, 10))
+        row = ttk.Frame(project)
+        row.pack(fill="x")
+        ttk.Entry(row, textvariable=self.creator_name).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.studio_button(row, "+ TẠO DỰ ÁN", self.creator_create, primary=True).pack(side="left")
+        ttk.Label(project, textvariable=self.creator_preview,
+                  foreground=COLORS["muted"], wraplength=800).pack(anchor="w", pady=(7, 0))
+
+        chooser = ttk.LabelFrame(self.creator_tab, text="03  CHỌN DỰ ÁN ĐỂ DỰNG", padding=12)
         chooser.pack(fill="x")
         row = ttk.Frame(chooser)
         row.pack(fill="x")
-        self.creator_dropdown = ttk.Combobox(row, textvariable=self.creator_selected, state="readonly", width=42)
+        self.creator_dropdown = ttk.Combobox(row, textvariable=self.creator_selected,
+                                             state="readonly", width=40)
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 8))
+        self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 6))
+        self.studio_button(row, "MỞ THƯ MỤC", self.creator_open_selected).pack(side="left", padx=(0, 6))
         self.studio_button(row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
-        self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(), self.creator_sync_edit()))
+        self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(),
+                                                             self.creator_sync_edit(), self.creator_update_channel_path()))
         self.creator_name.trace_add("write", lambda *_: self.creator_update_preview())
         self.creator_refresh_channels()
         self.creator_sync_edit()
+        self.creator_update_channel_path()
+
+    def creator_update_channel_path(self):
+        try:
+            self.creator_channel_path_text.set("Thư mục: " + str(self.creator_channel_path()))
+        except ValueError:
+            self.creator_channel_path_text.set("Chưa có kênh. Bấm + THÊM KÊNH để bắt đầu.")
+
+    def creator_channel_dialog(self, editing=False):
+        if editing and not self.creator_channel.get():
+            messagebox.showinfo("Chọn kênh", "Hãy chọn kênh trước.")
+            return
+        if editing:
+            self.creator_sync_edit()
+        dialog = tk.Toplevel(self.root)
+        dialog.title("TẠO KÊNH MỚI TỪ KÊNH ĐÃ CHỌN" if editing else "THÊM KÊNH MỚI")
+        dialog.configure(bg=COLORS["panel"])
+        dialog.geometry("640x225")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding=18)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        name_var = self.creator_edit_name if editing else self.creator_new_channel
+        path_var = self.creator_edit_base if editing else self.creator_base
+        ttk.Label(body, text="Tên kênh mới").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Entry(body, textvariable=name_var).grid(row=0, column=1, columnspan=2, sticky="ew", padx=8, pady=8)
+        ttk.Label(body, text="Nơi lưu kênh").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Entry(body, textvariable=path_var).grid(row=1, column=1, sticky="ew", padx=8, pady=8)
+        choose = self.creator_choose_edit if editing else self.creator_choose
+        self.studio_button(body, "CHỌN...", choose).grid(row=1, column=2, pady=8)
+        ttk.Label(body, text="Thư mục kênh cũ và dữ liệu cũ sẽ không bị thay đổi." if editing
+                  else "Chỉ cần lưu kênh một lần. Lần sau chọn từ danh sách.",
+                  foreground=COLORS["muted"]).grid(row=2, column=0, columnspan=3, sticky="w", pady=6)
+        def submit():
+            before = dict(self.creator_channels)
+            if editing:
+                self.creator_edit_channel()
+            else:
+                self.creator_create_channel()
+            if self.creator_channels != before:
+                dialog.destroy()
+        self.studio_button(body, "TẠO THƯ MỤC KÊNH MỚI" if editing else "LƯU KÊNH",
+                           submit, primary=True).grid(row=3, column=1, sticky="w", padx=8, pady=5)
+        dialog.bind("<Escape>", lambda _e: dialog.destroy())
+
+    def creator_show_add_channel(self):
+        self.creator_channel_dialog(False)
+
+    def creator_show_edit_channel(self):
+        self.creator_channel_dialog(True)
+
+    def creator_open_selected(self):
+        try:
+            name = self.creator_selected.get().strip()
+            if not name:
+                raise ValueError("Chưa chọn dự án.")
+            folder = self.creator_channel_path() / name
+            if not folder.is_dir():
+                raise ValueError("Thư mục dự án không tồn tại.")
+            os.startfile(str(folder))
+        except (OSError, ValueError, AttributeError) as exc:
+            messagebox.showerror("Mở thư mục", str(exc))
 
     def creator_sync_edit(self):
         try:
