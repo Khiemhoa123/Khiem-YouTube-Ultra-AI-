@@ -963,7 +963,7 @@ class KhiemYoutube:
             return
         try:
             subprocess.Popen([sys.executable, str(updater)], cwd=str(updater.parent))
-            messagebox.showinfo("Cập nhật", "Cửa sổ cập nhật đã mở. Kiểm tra GitHub, chọn file, sau đó đóng Khiêm YouTube trước khi xác nhận cài đặt.")
+            self.log("Đã mở cửa sổ cập nhật GitHub. Không cần xác nhận thêm tại đây.")
         except OSError as exc:
             messagebox.showerror("Cập nhật", str(exc))
 
