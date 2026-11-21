@@ -1125,9 +1125,6 @@ class KhiemYoutube:
                 pass
 
         try:
-            if mode == "capcut":
-                from smart_vietsub_v11 import ensure_translation_dependency
-                ensure_translation_dependency(logger)
             # Sử dụng thuật toán V6.8.
             # Reuse a verified timeline when source files and editing settings
             # have not changed. The export mode is deliberately excluded.
@@ -1214,15 +1211,9 @@ class KhiemYoutube:
             )
             self.set_progress(30)
 
-            # Vietnamese subtitles are review-only and never burned into MP4.
-            vietsub_path = None
-            if mode == "capcut":
-                try:
-                    from smart_vietsub_v11 import create as create_vietsub
-                    vietsub_path = create_vietsub(config, parts, logger)
-                except Exception as vietsub_error:
-                    logger("LỖI VIETSUB: " + str(vietsub_error))
-                    raise RuntimeError("Dừng xuất CapCut vì Vietsub chưa được tạo. " + str(vietsub_error)) from vietsub_error
+            # CapCut Pro handles optional captions after opening the draft.
+            # Do not run Whisper/Google Translate for subtitles during export.
+            logger("TURBO: Bỏ qua Vietsub AI. Có thể tạo phụ đề tự động trong CapCut Pro sau khi mở dự án.")
 
             if mode == "capcut":
                 from capcut import export
@@ -1232,12 +1223,6 @@ class KhiemYoutube:
                     parts,
                     logger
                 )
-                if vietsub_path:
-                    try:
-                        from smart_vietsub_v11 import attach_to_capcut
-                        attach_to_capcut(project_path, vietsub_path, logger)
-                    except Exception as subtitle_error:
-                        logger("CẢNH BÁO: Không chép được Vietsub: " + str(subtitle_error))
                 if config.get("_interview_intro"):
                     logger("Đã thêm interview đầu timeline CapCut: " + str(project_path))
 
