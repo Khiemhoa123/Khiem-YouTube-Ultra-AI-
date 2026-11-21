@@ -121,6 +121,10 @@ class KhiemYoutube:
         self.queue_shutdown = tk.BooleanVar(value=False)
         self.queue_shutdown_confirmed = False
         self.progress = tk.DoubleVar(value=0)
+        self.run_started_at = None
+        self.run_timer_active = False
+        self.run_elapsed = tk.StringVar(value="Thời gian chạy: 00:00:00")
+        self.run_stage = tk.StringVar(value="Trạng thái: Chưa chạy")
         self.buttons = []
 
         self.configure_style()
@@ -681,6 +685,11 @@ class KhiemYoutube:
             pady=14
         )
 
+        ttk.Label(self.export_tab, textvariable=self.run_elapsed,
+                  font=("Consolas", 12, "bold")).pack(anchor="w", pady=(0, 4))
+        ttk.Label(self.export_tab, textvariable=self.run_stage,
+                  wraplength=700).pack(anchor="w", pady=(0, 8))
+
         ttk.Label(
             self.export_tab,
             text="Nhật ký hoạt động"
@@ -937,11 +946,21 @@ class KhiemYoutube:
         self.queue.update(job, "running")
         self.start(job["mode"], config_override=dict(job["config"]), from_queue=True)
 
+    def tick_run_timer(self):
+        if not self.run_timer_active or self.run_started_at is None:
+            return
+        elapsed = max(0, int(time.monotonic() - self.run_started_at))
+        self.run_elapsed.set(f"Thời gian chạy: {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}")
+        self.root.after(1000, self.tick_run_timer)
+
     def log(self, message):
         def update():
+            message_text = str(message)
+            if self.busy and message_text.strip():
+                self.run_stage.set("Đang xử lý: " + message_text.strip().splitlines()[0][:115])
             self.log_box.insert(
                 "end",
-                str(message) + "\n"
+                message_text + "\n"
             )
             self.log_box.see("end")
 
@@ -1035,6 +1054,10 @@ class KhiemYoutube:
 
         self.busy = True
         self.progress.set(0)
+        self.run_started_at = time.monotonic()
+        self.run_timer_active = True
+        self.run_stage.set("Đang chuẩn bị dự án")
+        self.tick_run_timer()
 
         for button in self.buttons:
             button.configure(
@@ -1210,6 +1233,11 @@ class KhiemYoutube:
             self.root.after(0, lambda: self.finish(success, failure, from_queue))
 
     def finish(self, success=True, failure="", from_queue=False):
+        self.run_timer_active = False
+        if self.run_started_at is not None:
+            elapsed = max(0, int(time.monotonic() - self.run_started_at))
+            self.run_elapsed.set(f"Tổng thời gian: {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}")
+        self.run_stage.set("Hoàn thành" if success else "Lỗi, xem nhật ký")
         self.busy = False
         if from_queue and self.active_job:
             self.queue.update(self.active_job, "success" if success else "failed", failure)
