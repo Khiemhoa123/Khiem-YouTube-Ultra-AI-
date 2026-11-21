@@ -13,6 +13,14 @@ from queue_precheck_v11 import inspect as inspect_project
 
 import app as engine
 
+try:
+    import customtkinter as ctk
+    ctk.set_appearance_mode("dark")
+    CTK_READY = True
+except ImportError:
+    ctk = None
+    CTK_READY = False
+
 
 COLORS = {
     "bg": "#071321",
@@ -71,6 +79,7 @@ class KhiemYoutube:
         self.root.geometry("1240x850")
         self.root.minsize(1000, 650)
         self.root.configure(bg=COLORS["bg"])
+        self.root.option_add("*highlightThickness", 0)
 
         self.settings_file = (
             Path(__file__).resolve().parent
@@ -330,8 +339,7 @@ class KhiemYoutube:
         )
         header.pack(fill="x")
 
-        ttk.Button(header, text="CẬP NHẬT GITHUB", style="Accent.TButton",
-                   command=self.open_safe_updater).pack(side="right", anchor="n", padx=(12, 0))
+        self.studio_button(header, "CẬP NHẬT GITHUB", self.open_safe_updater, primary=True).pack(side="right", anchor="n", padx=(12, 0))
 
         tk.Label(header, text="▣  KHIÊM YOUTUBE", bg=COLORS["bg"],
                  fg=COLORS["text"], font=("Segoe UI", 22, "bold")).pack(side="left")
@@ -443,6 +451,26 @@ class KhiemYoutube:
             command=browse
         ).pack(side="right")
 
+    def studio_button(self, parent, title, command, primary=False):
+        if CTK_READY:
+            return ctk.CTkButton(
+                parent, text=title, command=command, corner_radius=10,
+                height=38, font=("Segoe UI", 12, "bold"),
+                fg_color="#087FAD" if primary else "#193D58",
+                hover_color="#0DB8DC" if primary else "#245575",
+                text_color="#FFFFFF", border_width=1,
+                border_color="#13D5F5" if primary else "#35617C"
+            )
+        return ttk.Button(parent, text=title, command=command,
+                          style="Accent.TButton" if primary else "TButton")
+
+    def studio_card(self, parent):
+        if CTK_READY:
+            return ctk.CTkFrame(parent, fg_color="#102437", corner_radius=14,
+                                border_width=1, border_color="#23617F")
+        return tk.Frame(parent, bg=COLORS["panel"],
+                        highlightbackground="#23617F", highlightthickness=1)
+
     def build_project(self):
         # Three-column studio dashboard, with all existing path settings.
         self.project_tab.configure(padding=10)
@@ -473,16 +501,15 @@ class KhiemYoutube:
             shell.columnconfigure(col, weight=weight, uniform="studio")
 
         def panel(col, title):
-            frame = tk.Frame(shell, bg=COLORS["panel"], highlightbackground="#334A60",
-                             highlightthickness=1, padx=8, pady=6)
+            frame = self.studio_card(shell)
             frame.grid(row=0, column=col, sticky="nsew", padx=5, pady=5)
             tk.Label(frame, text=title, bg=COLORS["panel"], fg=COLORS["accent"],
-                     font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
+                     font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=12, pady=(10, 7))
             return frame
 
         left = panel(0, "DỰ ÁN HIỆN TẠI")
-        ttk.Label(left, text="Tên dự án").pack(anchor="w")
-        ttk.Entry(left, textvariable=self.vars["name"]).pack(fill="x", pady=(2, 6))
+        ttk.Label(left, text="Tên dự án").pack(anchor="w", padx=12)
+        ttk.Entry(left, textvariable=self.vars["name"]).pack(fill="x", padx=12, pady=(2, 6))
         for key, label in (
             ("project_folder", "Thư mục chung"),
             ("txt", "Kịch bản TXT"), ("voice", "Voice MP3"),
@@ -491,7 +518,7 @@ class KhiemYoutube:
             ("out", "Nơi xuất kết quả"), ("draft_root", "Thư mục CapCut"),
             ("sample", "Mẫu CapCut tùy chọn")):
             line = ttk.Frame(left)
-            line.pack(fill="x", pady=2)
+            line.pack(fill="x", padx=12, pady=3)
             ttk.Label(line, text=label, width=23).pack(side="left")
             ttk.Entry(line, textvariable=self.vars[key], width=12).pack(side="left", fill="x", expand=True)
             def browse(k=key):
@@ -501,11 +528,11 @@ class KhiemYoutube:
             ttk.Button(line, text="…", width=3, command=browse).pack(side="right", padx=(4, 0))
 
         center = panel(1, "ULTRA AI STUDIO")
-        banner = tk.Frame(center,bg="#0B1E32",highlightbackground="#176582",highlightthickness=1,padx=10,pady=7)
-        banner.pack(fill="x",pady=(0,7))
-        tk.Label(banner,text="Dựng video YouTube tự động bằng AI",bg="#0B1E32",fg="#F2F6FC",font=("Segoe UI",13,"bold")).pack(anchor="w")
+        banner = self.studio_card(center)
+        banner.pack(fill="x",padx=12,pady=(0,12))
+        tk.Label(banner,text="Dựng video YouTube tự động bằng AI",bg="#0B1E32",fg="#F2F6FC",font=("Segoe UI",13,"bold")).pack(anchor="w",padx=12,pady=(10,4))
         indicators = tk.Frame(banner,bg="#0B1E32")
-        indicators.pack(anchor="w",pady=(4,0))
+        indicators.pack(anchor="w",padx=12,pady=(4,10))
         for label,var in (("CLIP",self.ai),("Whisper",self.align),("NVENC",self.gpu),("Smart Timeline",self.vars["smart_timeline"])):
             status = tk.Label(indicators,bg="#0B1E32",font=("Segoe UI",11))
             status.pack(side="left",padx=(0,12))
@@ -514,25 +541,25 @@ class KhiemYoutube:
                 w.configure(text=("✓ " if enabled else "○ ")+name,fg="#13D5F5" if enabled else "#AAB9CA")
             refresh()
             var.trace_add("write",refresh)
-        ttk.Label(center,text="THAO TÁC NHANH",foreground=COLORS["accent"],font=("Segoe UI",12,"bold")).pack(anchor="w",pady=(1,4))
+        ttk.Label(center,text="THAO TÁC NHANH",foreground=COLORS["accent"],font=("Segoe UI",12,"bold")).pack(anchor="w",padx=12,pady=(1,4))
         actions = ttk.Frame(center)
-        actions.pack(fill="x")
+        actions.pack(fill="x",padx=12)
         for i in range(3):
             actions.columnconfigure(i,weight=1,uniform="actions")
         for i,(label,mode) in enumerate((("Xuất CapCut","capcut"),("Kiểm tra tư liệu","check"),("Xuất MP4","render"))):
-            button=ttk.Button(actions,text=label,style="Accent.TButton" if mode=="capcut" else "TButton",command=lambda m=mode:self.start(m))
+            button=self.studio_button(actions,label,lambda m=mode:self.start(m),primary=mode=="capcut")
             button.grid(row=0,column=i,sticky="ew",padx=2,pady=2)
             self.buttons.append(button)
         for i,(label,mode) in enumerate((("+ Đợi CapCut","capcut"),("+ Đợi MP4","render"))):
-            ttk.Button(actions,text=label,command=lambda m=mode:self.queue_add(m)).grid(row=1,column=i,sticky="ew",padx=2,pady=2)
-        ttk.Button(actions,text="Mở thư mục xuất",command=self.open_output).grid(row=1,column=2,sticky="ew",padx=2,pady=2)
+            self.studio_button(actions,label,lambda m=mode:self.queue_add(m)).grid(row=1,column=i,sticky="ew",padx=2,pady=2)
+        self.studio_button(actions,"Mở thư mục xuất",self.open_output).grid(row=1,column=2,sticky="ew",padx=2,pady=2)
         status_frame=ttk.Frame(center)
-        status_frame.pack(fill="x",pady=(8,0))
+        status_frame.pack(fill="x",padx=12,pady=(12,0))
         ttk.Label(status_frame,textvariable=self.run_stage,wraplength=440).pack(side="left")
         ttk.Label(status_frame,textvariable=self.run_elapsed).pack(side="right")
-        ttk.Progressbar(center,variable=self.progress,maximum=100).pack(fill="x",pady=4)
+        ttk.Progressbar(center,variable=self.progress,maximum=100).pack(fill="x",padx=12,pady=8)
         for var in (self.scene_status,self.balance_status):
-            ttk.Label(center,textvariable=var,wraplength=500).pack(anchor="w",pady=1)
+            ttk.Label(center,textvariable=var,wraplength=500).pack(anchor="w",padx=12,pady=1)
         bind_project_wheel(body)
 
     def build_editor(self):
