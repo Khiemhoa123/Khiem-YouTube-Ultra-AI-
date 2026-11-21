@@ -54,7 +54,7 @@ def export(c,parts,log):
    ek,em=extras[old]; em=copy.deepcopy(em); em['id']=uid()
    if ek=='canvases':
     if c.get('background')=='Nền mờ':em.update(type='canvas_blur',blur=min(1,max(0,float(c.get('blur',30))/80)))
-    else:em.update(type='canvas_color',color='#000000',blur=0)
+    else:em.update(type='canvas_color',color={'Nền trắng':'#FFFFFF','Nền xám':'#808080','Nền xanh đen':'#101722'}.get(c.get('background'),'#000000'),blur=0)
    mts[ek].append(em); refs.append(em['id'])
   s.update(id=uid(),material_id=seen[(kind,path)],extra_material_refs=refs,common_keyframes=[],keyframe_refs=[],source_timerange={'start':source_start,'duration':length},target_timerange={'start':start,'duration':length},speed=1.,volume=1. if kind=='audio' else 0.)
   if kind!='audio':
@@ -110,7 +110,7 @@ def export(c,parts,log):
     if added%3!=0:
      added+=1;continue
     transition=copy.deepcopy(fade);transition['id']=uid()
-    transition['duration']=min(466666,left['duration']//4,right['duration']//4)
+    transition['duration']=min(466666,max(1,round(float(c.get('transition_time',.5))*1e6)),left['duration']//4,right['duration']//4)
     mts['transitions'].append(transition)
     cur.setdefault('extra_material_refs',[]).append(transition['id'])
     added+=1
