@@ -37,6 +37,32 @@ def _voice_rows(voice, log):
             for s in segments if s.text.strip() and s.end > s.start]
     return rows, getattr(info, "language", None)
 
+def ensure_translation_dependency(log):
+    """Install translation dependency once in the running Python environment.
+
+    Called before expensive timeline/interview processing. Requires Internet.
+    """
+    try:
+        import deep_translator
+        return True
+    except ImportError:
+        import subprocess
+        import sys
+        log("VIETSUB: Đang tự cài thư viện deep-translator, vui lòng chờ...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "deep-translator"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            timeout=240,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode != 0:
+            raise RuntimeError("Không tự cài được deep-translator. "
+                               + (result.stderr or result.stdout)[-1000:])
+        import importlib
+        importlib.invalidate_caches()
+        import deep_translator
+        log("VIETSUB: Đã cài thư viện dịch tiếng Việt.")
+
 def _translate(rows, language, log, cache_path=None):
     if language == "vi":
         return rows
