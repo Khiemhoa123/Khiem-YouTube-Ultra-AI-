@@ -138,3 +138,65 @@ def prepend_mp4(c, intro, log):
         _run(cmd)
         os.replace(output, dest)
     log("Đã ghép phỏng vấn gốc vào đầu MP4: " + str(dest))
+
+
+def insert_interview_cutaways(parts, intro, c, log):
+    """Insert silent two-second interview visuals into narration sections.
+
+    Preserves every voice track and all timeline durations. Uses original
+    footage without generating artificial mouth movements.
+    """
+    if not intro or not c.get("interview_enabled", False):
+        return parts
+    import copy
+    import math
+    source = str(intro["source"])
+    try:
+        info = _probe(source)
+        source_length = float(info.get("format", {}).get("duration", 0) or 0)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        log("CẢNH BÁO: Không thể tạo cutaway interview: " + str(exc))
+        return parts
+    fps = max(1, int(round(float(c.get("fps", 30)))))
+    count = 0
+    # Pick a different interview source window for each narration section.
+    next_source = float(intro.get("source_start", 0)) + float(intro["duration"]) + 1.0
+    for p in parts:
+        clips = p.get("clips", [])
+        if not clips or float(p.get("duration", 0)) < 7:
+            continue
+        two_frames = 2 * fps
+        options = [(i, s) for i, s in enumerate(clips)
+                   if int(s.get("frames", 0)) >= two_frames + 2 * fps]
+        if not options:
+            continue
+        midpoint = float(clips[0]["start"]) + float(p["duration"]) / 2
+        i, clip = min(options, key=lambda item:
+                      abs(float(item[1]["start"]) + float(item[1]["duration"]) / 2 - midpoint))
+        before = (int(clip["frames"]) - two_frames) // 2
+        after = int(clip["frames"]) - before - two_frames
+        if before < 1 or after < 1:
+            continue
+        if next_source + 2 > source_length:
+            next_source = max(0.0, float(intro.get("source_start", 0)) - 3.0)
+        if next_source + 2 > source_length:
+            log("CẢNH BÁO: Interview quá ngắn để chèn cutaway.")
+            break
+        first = copy.deepcopy(clip)
+        first["frames"] = before
+        first["duration"] = before / fps
+        cut = dict(part=clip.get("part", p.get("number")), type="video",
+                   source=source, source_start=next_source,
+                   start=float(clip["start"]) + before / fps,
+                   frames=two_frames, duration=2.0, effect="Tĩnh")
+        last = copy.deepcopy(clip)
+        last["start"] = cut["start"] + 2.0
+        last["frames"] = after
+        last["duration"] = after / fps
+        if last["type"] == "video":
+            last["source_start"] = float(clip["source_start"]) + (before + two_frames) / fps
+        p["clips"] = clips[:i] + [first, cut, last] + clips[i + 1:]
+        next_source += 3.5
+        count += 1
+    log(f"SMART INTERVIEW CUTAWAY: Đã chèn {count} cảnh 2 giây, không thay đổi Voice AI.")
+    return parts
