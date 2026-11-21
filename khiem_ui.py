@@ -979,16 +979,22 @@ class KhiemYoutube:
             return
         elapsed = max(0, int(time.monotonic() - self.run_started_at))
         self.run_elapsed.set(f"Thời gian chạy: {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}")
+        quiet = int(time.monotonic() - self.last_log_at)
+        if quiet >= 5:
+            prefix = "Chưa có tiến độ mới" if quiet >= 30 else "Đang chờ kết quả"
+            self.run_stage.set(f"{prefix} ({quiet}s): {self.last_log_stage[:110]}")
         self.root.after(1000, self.tick_run_timer)
 
     def log(self, message):
         def update():
             message_text = str(message)
+            self.last_log_at = time.monotonic()
+            self.last_log_stage = message_text.strip().splitlines()[0] if message_text.strip() else ""
             if self.busy and message_text.strip():
                 self.run_stage.set("Đang xử lý: " + message_text.strip().splitlines()[0][:115])
             self.log_box.insert(
                 "end",
-                message_text + "\n"
+                time.strftime("[%H:%M:%S] ") + message_text + "\n"
             )
             self.log_box.see("end")
 
@@ -1084,6 +1090,8 @@ class KhiemYoutube:
         self.progress.set(0)
         self.run_started_at = time.monotonic()
         self.run_timer_active = True
+        self.last_log_at = time.monotonic()
+        self.last_log_stage = "Chuẩn bị dự án"
         self.run_stage.set("Đang chuẩn bị dự án")
         self.tick_run_timer()
 
@@ -1126,7 +1134,7 @@ class KhiemYoutube:
                     encoding="utf-8"
                 ) as file:
                     file.write(
-                        str(message) + "\n"
+                        time.strftime("[%H:%M:%S] ") + str(message) + "\n"
                     )
             except OSError:
                 pass
@@ -1142,6 +1150,7 @@ class KhiemYoutube:
                                "interview_enabled", "interview_max_seconds")
                 and not key.startswith("_")
             }
+            logger("CACHE: Kiểm tra thay đổi các file nguồn.")
             source_manifest = []
             for field in ("voice", "txt", "images", "videos"):
                 folder = Path(str(config.get(field, "")))
@@ -1171,7 +1180,9 @@ class KhiemYoutube:
                 except (OSError, ValueError, TypeError):
                     parts = None
             if parts is None:
+                logger("TIMELINE: Bắt đầu phân tích Voice, TXT và lựa chọn tư liệu.")
                 parts = engine.plan(config, logger)
+                logger("TIMELINE: Hoàn thành lập timeline.")
                 try:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     cache_path.write_text(json.dumps(
@@ -1182,13 +1193,16 @@ class KhiemYoutube:
                     logger("Không lưu được timeline cache: " + str(cache_error))
 
             from pre_export_qa_v11 import validate as validate_timeline
+            logger("QA: Bắt đầu kiểm tra timeline.")
             validate_timeline(parts, config, logger)
 
             config["_interview_intro"] = None
             if mode in ("render", "capcut") and config.get("interview_enabled"):
                 from smart_interview_intro import choose_intro
                 try:
+                    logger("INTERVIEW: Bắt đầu phân tích video phỏng vấn.")
                     config["_interview_intro"] = choose_intro(config, logger)
+                    logger("INTERVIEW: Hoàn tất lựa chọn intro.")
                 except Exception as intro_error:
                     logger("CẢNH BÁO SMART INTERVIEW INTRO: " + str(intro_error))
                     logger("Bỏ qua intro và tiếp tục xuất video bình thường.")
@@ -1227,6 +1241,7 @@ class KhiemYoutube:
             if mode == "capcut":
                 from capcut import export
 
+                logger("CAPCUT: Bắt đầu ghi dự án và các track.")
                 project_path = export(
                     config,
                     parts,
@@ -1236,6 +1251,7 @@ class KhiemYoutube:
                     logger("Đã thêm interview đầu timeline CapCut: " + str(project_path))
 
             elif mode == "render":
+                logger("MP4: Bắt đầu render.")
                 engine.render(
                     config,
                     parts,
