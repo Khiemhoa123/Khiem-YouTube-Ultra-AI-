@@ -141,100 +141,160 @@ def prepend_mp4(c, intro, log):
 
 
 def insert_interview_cutaways(parts, intro, c, log):
-    """Silent two-second interview cutaways with global spacing and source dedup.
+    """Story-first cutaways. Never insert solely to satisfy a scene quota.
 
-    The manually selected interview is the only cutaway source. Identity cannot
-    be verified automatically, so source identity must be checked by the editor.
+    Uses transcript overlap as a conservative relevance gate, not a claim of
+    face identification or automatic lip synchronization.
     """
     import copy
     if not intro or not c.get("interview_enabled", False):
         return parts
     source = str(intro["source"])
     try:
-        info = _probe(source)
-        length = float(info.get("format", {}).get("duration", 0) or 0)
+        length = float(_probe(source).get("format", {}).get("duration", 0) or 0)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        log("CẢNH BÁO: Không phân tích được interview: " + str(exc))
+        log("SMART STORY: Không đọc được interview: " + str(exc))
         return parts
-    if length < 2.0:
+    if length < 2:
         return parts
+
+    # Only use spoken interview passages we can actually understand.
+    try:
+        from faster_whisper import WhisperModel
+        model = WhisperModel("base", device="cpu", compute_type="int8")
+        segments, _ = model.transcribe(source, vad_filter=True, beam_size=3)
+        rows = list(segments)
+        del model
+    except Exception as exc:
+        log("SMART STORY: Không xác minh được nội dung interview, bỏ qua cutaway: " + str(exc))
+        return parts
+
+    # Read numbered scripts using the same naming/index rules as the main editor.
+    try:
+        import app as engine
+        if c.get("project_folder"):
+            from auto_project_v11 import discover
+            scripts = discover(c["project_folder"], c.get("interview_file"))["txt"]
+        else:
+            scripts = engine.indexed(c["txt"], {".txt"})
+    except Exception as exc:
+        log("SMART STORY: Không đọc được kịch bản Number: " + str(exc))
+        return parts
+
+    stop = set("the a an and or but is are was were it i you we they he she to of in on for with at from that this those these my your his her our their have has had do did not so as by be been can could would should when what who where how just very about then than there here".split())
+    def keywords(value):
+        return {w for w in re.findall(r"[a-z]{3,}", value.lower()) if w not in stop}
+
+    source_segments = []
+    reserved = [(float(intro.get("source_start", 0)),
+                 float(intro.get("source_start", 0)) + float(intro["duration"]))]
+    for row in rows:
+        start = max(0.0, float(row.start))
+        end = min(length, float(row.end))
+        if end - start < 1.5:
+            continue
+        for t in (start, max(start, (start + end - 2) / 2)):
+            if t + 2 > length:
+                continue
+            if any(not (t + 2 <= a - 1 or t >= b + 1) for a, b in reserved):
+                continue
+            source_segments.append((t, keywords(row.text), row.text.strip()))
+    if not source_segments:
+        log("SMART STORY: Không có câu phỏng vấn hợp lệ ngoài Opening.")
+        return parts
+
     fps = max(1, int(round(float(c.get("fps", 30)))))
     cut_frames = 2 * fps
-    gap = 45.0
-    # Reserve the intro source interval; never use it as a cutaway.
-    used_source = [(float(intro.get("source_start", 0)),
-                    float(intro.get("source_start", 0)) + float(intro["duration"]))]
-    global_cutaways = []
-    count = 0
-
-    def get_source():
-        # Search disjoint two-second windows with safety padding on both sides.
-        for n in range(int(max(0, length - 2) // 3) + 1):
-            st = float(n * 3)
-            if st + 2 > length:
-                break
-            if all(st >= end + 1 or st + 2 <= start - 1
-                   for start, end in used_source):
-                used_source.append((st, st + 2))
-                return st
-        return None
-
-    # Work in absolute timeline coordinates. Re-evaluate candidates after
-    # each insertion and do not rely on the order of Number processing.
-    for p in sorted(parts, key=lambda part: float(part.get("clips", [{}])[0].get("start", 0))):
-        # Part one is the Opening; cutaways belong to numbered chapters only.
-        if int(p.get("number", 0)) <= 1:
+    min_gap = 45.0
+    timeline_ends = []
+    inserted_total = 0
+    for p in sorted(parts, key=lambda x: min((float(z["start"]) for z in x.get("clips", [])), default=0)):
+        number = int(p.get("number", 0))
+        if number <= 1 or number not in scripts:
             continue
         clips = p.get("clips", [])
-        duration = float(p.get("duration", 0))
-        if not clips or duration < 35:
+        if not clips:
+            continue
+        script = scripts[number].read_text(encoding="utf-8-sig", errors="replace")
+        script_words = script.split()
+        if not script_words:
             continue
         part_start = min(float(x["start"]) for x in clips)
+        duration = float(p.get("duration", 0))
         part_end = part_start + duration
-        target = min(4, max(1, int(duration / 55 + 0.5)))
-        inserted = 0
-        for k in range(target):
-            desired = part_start + duration * (k + 1) / (target + 1)
-            candidates = []
-            for index, clip in enumerate(clips):
-                frames = int(clip.get("frames", 0))
-                if frames < cut_frames + 2 * fps:
-                    continue
-                before = (frames - cut_frames) // 2
-                t = float(clip["start"]) + before / fps
-                if t < part_start + 5 or t + 2 > part_end - 5:
-                    continue
-                if any(not (t >= other + 2 + gap or other >= t + 2 + gap)
-                       for other in global_cutaways):
-                    continue
-                candidates.append((abs(t - desired), index, before, t))
-            if not candidates:
+        if duration < 35:
+            continue
+
+        # Match each possible insertion to the script spoken around that time.
+        ranked = []
+        for index, clip in enumerate(clips):
+            frames = int(clip.get("frames", 0))
+            if frames < cut_frames + 2 * fps:
                 continue
-            source_start = get_source()
-            if source_start is None:
-                log("CẢNH BÁO: Hết đoạn interview chưa sử dụng, không lặp cảnh.")
+            before = (frames - cut_frames) // 2
+            t = float(clip["start"]) + before / fps
+            if t < part_start + 5 or t + 2 > part_end - 5:
+                continue
+            fraction = max(0.0, min(1.0, (t - part_start) / duration))
+            mid = int(fraction * len(script_words))
+            context = keywords(" ".join(script_words[max(0, mid - 35):mid + 35]))
+            if not context:
+                continue
+            for source_t, source_words, spoken in source_segments:
+                common = context & source_words
+                # At least two informative matching words. No match = no cutaway.
+                if len(common) < 2:
+                    continue
+                score = len(common) / max(1, len(source_words))
+                ranked.append((score, t, index, before, source_t, spoken, common))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        placed = 0
+        # Re-evaluate positions after each insertion, preserving original scene time.
+        selected_times = []
+        for score, t, index, before, source_t, spoken, common in ranked:
+            if placed >= 4:
                 break
-            _, index, before, t = min(candidates)
-            clip = clips[index]
-            after = int(clip["frames"]) - before - cut_frames
-            first = copy.deepcopy(clip)
-            first["frames"] = before
-            first["duration"] = before / fps
-            cut = dict(part=clip.get("part", p.get("number")), type="video",
-                       source=source, source_start=source_start,
-                       start=t, frames=cut_frames, duration=2.0,
-                       effect="Tĩnh", interview_cutaway=True)
-            last = copy.deepcopy(clip)
-            last["start"] = t + 2.0
-            last["frames"] = after
-            last["duration"] = after / fps
+            if any(not (t >= end + min_gap or t + 2 + min_gap <= end - 2)
+                   for end in timeline_ends):
+                continue
+            if any(abs(t - existing) < min_gap + 2 for existing in selected_times):
+                continue
+            if any(not (source_t + 2 <= a - 1 or source_t >= b + 1)
+                   for a, b in reserved):
+                continue
+            # Locate original clip by its stable timeline position after splits.
+            actual_index = next((i for i, cl in enumerate(clips)
+                                 if float(cl["start"]) <= t + 0.0001
+                                 and float(cl["start"]) + float(cl["duration"]) >= t + 2 - 0.0001
+                                 and int(cl["frames"]) >= cut_frames + 2), None)
+            if actual_index is None:
+                continue
+            original = clips[actual_index]
+            before_frames = round((t - float(original["start"])) * fps)
+            after_frames = int(original["frames"]) - before_frames - cut_frames
+            if before_frames < 1 or after_frames < 1:
+                continue
+            first = copy.deepcopy(original)
+            first["frames"] = before_frames
+            first["duration"] = before_frames / fps
+            cut = dict(part=number, type="video", source=source,
+                       source_start=source_t, start=t, frames=cut_frames,
+                       duration=2.0, effect="Tĩnh", interview_cutaway=True)
+            last = copy.deepcopy(original)
+            last["start"] = t + 2
+            last["frames"] = after_frames
+            last["duration"] = after_frames / fps
             if last["type"] == "video":
-                last["source_start"] = float(clip["source_start"]) + (before + cut_frames) / fps
-            clips = clips[:index] + [first, cut, last] + clips[index + 1:]
-            global_cutaways.append(t)
-            inserted += 1
-            count += 1
+                last["source_start"] = float(original["source_start"]) + (before_frames + cut_frames) / fps
+            clips = clips[:actual_index] + [first, cut, last] + clips[actual_index + 1:]
+            reserved.append((source_t, source_t + 2))
+            timeline_ends.append(t + 2)
+            selected_times.append(t)
+            placed += 1
+            inserted_total += 1
+            log(f"SMART STORY Number {number}: {t:.1f}s, interview {source_t:.1f}s, khớp: {', '.join(sorted(common))[:90]}")
         p["clips"] = clips
-        log(f"Number {p.get('number', '?')}: {inserted} interview cutaway.")
-    log(f"SMART INTERVIEW: {count} cảnh 2 giây, khoảng cách >= {gap:.0f}s, không trùng nguồn hoặc Opening.")
+        if not placed:
+            log(f"SMART STORY Number {number}: Không có interview đủ liên quan, không chèn.")
+    log(f"SMART STORY: {inserted_total} interview cutaway có đối chiếu nội dung, không ép số lượng.")
     return parts
