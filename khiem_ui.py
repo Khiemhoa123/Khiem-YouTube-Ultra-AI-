@@ -1141,6 +1141,10 @@ class KhiemYoutube:
                     logger("Bỏ qua intro và tiếp tục xuất video bình thường.")
                     config["_interview_intro"] = None
 
+            if mode in ("render", "capcut") and config.get("_interview_intro"):
+                from smart_interview_intro import insert_interview_cutaways
+                parts = insert_interview_cutaways(parts, config["_interview_intro"], config, logger)
+
             timeline = (
                 Path(config["out"])
                 / (
