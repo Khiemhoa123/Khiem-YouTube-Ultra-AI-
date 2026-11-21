@@ -1,6 +1,6 @@
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, font as tkfont
 from pathlib import Path
 import threading
 import json
@@ -199,13 +199,19 @@ class KhiemYoutube:
         c = COLORS
         style = ttk.Style(self.root)
         style.theme_use("clam")
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont"):
+            tkfont.nametofont(name).configure(family="Segoe UI", size=11)
+        self.root.option_add("*Font", ("Segoe UI", 11))
+        style.configure(".", font=("Segoe UI", 11))
+        style.configure("Treeview", font=("Segoe UI", 11), rowheight=28)
+        style.configure("Treeview.Heading", font=("Segoe UI", 12, "bold"))
 
         # Consistent dark editor cards and native widget surfaces.
         style.configure("TLabelframe", background=c["panel"],
                         bordercolor="#28516B", lightcolor="#28516B",
                         darkcolor="#28516B", relief="solid", borderwidth=1)
         style.configure("TLabelframe.Label", background=c["panel"],
-                        foreground=c["accent"], font=("Segoe UI", 10, "bold"))
+                        foreground=c["accent"], font=("Segoe UI", 12, "bold"))
         style.configure("TCombobox", bordercolor="#28516B",
                         lightcolor=c["input"], darkcolor=c["input"],
                         arrowcolor=c["accent"])
@@ -235,7 +241,7 @@ class KhiemYoutube:
             background=c["panel"],
             foreground=c["muted"],
             padding=(28, 8),
-            font=("Segoe UI", 11, "bold")
+            font=("Segoe UI", 12, "bold")
         )
         style.map(
             "TNotebook.Tab",
@@ -251,13 +257,13 @@ class KhiemYoutube:
             "TLabel",
             background=c["panel"],
             foreground=c["text"],
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
         style.configure(
             "TCheckbutton",
             background=c["panel"],
             foreground=c["text"],
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
         style.map(
             "TCheckbutton",
@@ -275,7 +281,7 @@ class KhiemYoutube:
             fieldbackground=c["input"],
             background=c["input"],
             foreground=c["text"],
-            padding=7
+            padding=3
         )
         style.map(
             "TCombobox",
@@ -292,7 +298,7 @@ class KhiemYoutube:
             background=c["input"],
             foreground=c["text"],
             padding=(8, 4),
-            font=("Segoe UI", 10)
+            font=("Segoe UI", 11)
         )
 
         style.configure(
@@ -300,7 +306,7 @@ class KhiemYoutube:
             background=c["accent"],
             foreground=c["bg"],
             padding=(8, 4),
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 12, "bold")
         )
         style.map(
             "Accent.TButton",
@@ -328,7 +334,7 @@ class KhiemYoutube:
                    command=self.open_safe_updater).pack(side="right", anchor="n", padx=(12, 0))
 
         tk.Label(header, text="▣  KHIÊM YOUTUBE", bg=COLORS["bg"],
-                 fg=COLORS["text"], font=("Segoe UI", 20, "bold")).pack(side="left")
+                 fg=COLORS["text"], font=("Segoe UI", 22, "bold")).pack(side="left")
         tk.Label(header, text="  |  ULTRA AI STUDIO v11.3", bg=COLORS["bg"],
                  fg=COLORS["accent"], font=("Segoe UI", 14, "bold")).pack(side="left")
 
@@ -471,7 +477,7 @@ class KhiemYoutube:
                              highlightthickness=1, padx=8, pady=6)
             frame.grid(row=0, column=col, sticky="nsew", padx=5, pady=5)
             tk.Label(frame, text=title, bg=COLORS["panel"], fg=COLORS["accent"],
-                     font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 5))
+                     font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 5))
             return frame
 
         left = panel(0, "DỰ ÁN HIỆN TẠI")
@@ -501,14 +507,14 @@ class KhiemYoutube:
         indicators = tk.Frame(banner,bg="#0B1E32")
         indicators.pack(anchor="w",pady=(4,0))
         for label,var in (("CLIP",self.ai),("Whisper",self.align),("NVENC",self.gpu),("Smart Timeline",self.vars["smart_timeline"])):
-            status = tk.Label(indicators,bg="#0B1E32",font=("Segoe UI",9))
+            status = tk.Label(indicators,bg="#0B1E32",font=("Segoe UI",11))
             status.pack(side="left",padx=(0,12))
             def refresh(*args, v=var, w=status, name=label):
                 enabled = str(v.get()).lower() in ("1","true")
                 w.configure(text=("✓ " if enabled else "○ ")+name,fg="#13D5F5" if enabled else "#AAB9CA")
             refresh()
             var.trace_add("write",refresh)
-        ttk.Label(center,text="THAO TÁC NHANH",foreground=COLORS["accent"],font=("Segoe UI",11,"bold")).pack(anchor="w",pady=(1,4))
+        ttk.Label(center,text="THAO TÁC NHANH",foreground=COLORS["accent"],font=("Segoe UI",12,"bold")).pack(anchor="w",pady=(1,4))
         actions = ttk.Frame(center)
         actions.pack(fill="x")
         for i in range(3):
@@ -669,7 +675,7 @@ class KhiemYoutube:
         self.tabs.bind("<<NotebookTabChanged>>", lambda e: self.resize_log(.92 if self.tabs.select() == str(self.editor_tab) else .80), add="+")
         header = ttk.Frame(self.log_panel)
         header.pack(fill="x")
-        ttk.Label(header, text="NHẬT KÝ XỬ LÝ", foreground=COLORS["accent"], font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(header, text="NHẬT KÝ XỬ LÝ", foreground=COLORS["accent"], font=("Segoe UI", 12, "bold")).pack(side="left")
         for label, fn in (("Xóa", lambda: self.log_box.delete("1.0", "end")),
                           ("Phóng to", lambda: self.resize_log(.50)),
                           ("Thu nhỏ", lambda: self.resize_log(1.0)),
@@ -678,7 +684,7 @@ class KhiemYoutube:
         body = ttk.Frame(self.log_panel)
         body.pack(fill="both", expand=True)
         self.log_box = tk.Text(body, height=3, bg="#0D141E", fg="#DDE9F5",
-                               insertbackground="white", font=("Consolas", 11), relief="flat", wrap="word")
+                               insertbackground="white", font=("Consolas", 12), relief="flat", wrap="word")
         for tag, color in (("warning","#FBBF24"),("error","#F87171"),("success","#4ADE80"),("info","#DDE9F5")):
             self.log_box.tag_configure(tag, foreground=color)
         scroll = ttk.Scrollbar(body, orient="vertical", command=self.log_box.yview)
