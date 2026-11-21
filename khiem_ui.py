@@ -175,9 +175,16 @@ class KhiemYoutube:
         }
 
         if config.get("project_folder", "").strip():
-            folder = config["project_folder"].strip()
-            for key in ("voice", "txt", "images", "videos"):
-                config[key] = folder
+            folder = Path(config["project_folder"].strip())
+            structured = (folder / "01 - Voice").is_dir() and (folder / "02 - Kich Ban TXT").is_dir()
+            if structured:
+                for key, dirname in (("voice", "01 - Voice"), ("txt", "02 - Kich Ban TXT"),
+                                     ("images", "03 - Hinh Anh"), ("videos", "04 - Video"),
+                                     ("interview_folder", "05 - Interview"), ("out", "06 - Xuat Video")):
+                    config[key] = str(folder / dirname)
+            else:
+                for key in ("voice", "txt", "images", "videos"):
+                    config[key] = str(folder)
         config.update({
             "interview_enabled": self.interview_enabled.get(),
             "gpu": self.gpu.get(),
@@ -374,7 +381,101 @@ class KhiemYoutube:
         self.build_editor()
         self.build_export()
         self.build_queue()
+        self.build_creator()
 
+
+    def build_creator(self):
+        self.creator_tab = ttk.Frame(self.tabs, padding=22)
+        self.tabs.add(self.creator_tab, text="04  TẠO DỰ ÁN")
+        self.creator_name = tk.StringVar(value="")
+        self.creator_base = tk.StringVar(value=str(Path.home() / "Documents" / "KHIEM YOUTUBE"))
+        self.creator_preview = tk.StringVar(value="")
+        self.heading(self.creator_tab, "TẠO DỰ ÁN MỚI")
+        ttk.Label(self.creator_tab, text="Nhập tên, chọn nơi lưu rồi tạo bộ thư mục. Tab 01 sẽ tự nhận đường dẫn.").pack(anchor="w", pady=(0, 16))
+        panel = ttk.LabelFrame(self.creator_tab, text="THÔNG TIN DỰ ÁN", padding=18)
+        panel.pack(fill="x")
+        ttk.Label(panel, text="Tên dự án").grid(row=0, column=0, sticky="w", pady=8)
+        ttk.Entry(panel, textvariable=self.creator_name).grid(row=0, column=1, sticky="ew", padx=10, pady=8)
+        ttk.Label(panel, text="Thư mục lưu").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Entry(panel, textvariable=self.creator_base).grid(row=1, column=1, sticky="ew", padx=10, pady=8)
+        self.studio_button(panel, "Chọn thư mục", self.creator_choose).grid(row=1, column=2, pady=8)
+        panel.columnconfigure(1, weight=1)
+        ttk.Label(panel, text="Đường dẫn dự kiến").grid(row=2, column=0, sticky="w", pady=8)
+        ttk.Label(panel, textvariable=self.creator_preview, wraplength=700).grid(row=2, column=1, columnspan=2, sticky="w", padx=10, pady=8)
+        for var in (self.creator_name, self.creator_base):
+            var.trace_add("write", lambda *_: self.creator_update_preview())
+        self.creator_update_preview()
+        ttk.Label(self.creator_tab, text="Thư mục được tạo: 01 - Voice | 02 - Kich Ban TXT | 03 - Hinh Anh | 04 - Video | 05 - Interview | 06 - Xuat Video", wraplength=900).pack(anchor="w", pady=16)
+        buttons = ttk.Frame(self.creator_tab)
+        buttons.pack(anchor="w")
+        self.studio_button(buttons, "TẠO DỰ ÁN & ĐIỀN TAB 01", self.creator_create, primary=True).pack(side="left", padx=(0, 8))
+        self.studio_button(buttons, "MỞ THƯ MỤC", self.creator_open).pack(side="left")
+
+    def creator_choose(self):
+        folder = filedialog.askdirectory(title="Chọn nơi lưu dự án")
+        if folder:
+            self.creator_base.set(folder)
+
+    def creator_target(self):
+        name = self.creator_name.get().strip()
+        if not name or name in (".", "..") or name.endswith((".", " ")) or re.search(r'[<>:"/\\|?*\\x00-\\x1f]', name):
+            raise ValueError("Tên dự án không hợp lệ. Không dùng ký tự đặc biệt hoặc dấu chấm cuối.")
+        if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+            raise ValueError("Tên dự án trùng tên hệ thống Windows.")
+        base = self.creator_base.get().strip()
+        if not base:
+            raise ValueError("Chưa chọn thư mục lưu.")
+        return Path(base).expanduser() / name
+
+    def creator_update_preview(self):
+        try:
+            self.creator_preview.set(str(self.creator_target()))
+        except ValueError:
+            self.creator_preview.set("Nhập tên dự án và chọn nơi lưu.")
+
+    def creator_create(self):
+        if self.busy or self.queue_running:
+            messagebox.showwarning("Đang xử lý", "Hãy đợi tác vụ hiện tại hoàn tất.")
+            return
+        try:
+            target = self.creator_target()
+            folders = {
+                "voice": "01 - Voice", "txt": "02 - Kich Ban TXT",
+                "images": "03 - Hinh Anh", "videos": "04 - Video",
+                "interview_folder": "05 - Interview", "out": "06 - Xuat Video"
+            }
+            if target.exists() and not target.is_dir():
+                raise ValueError("Đường dẫn dự án đã là một file.")
+            if target.exists() and any(target.iterdir()):
+                if not messagebox.askyesno("Dự án đã tồn tại",
+                        "Thư mục này đã có dữ liệu. Giữ nguyên file cũ và chỉ tạo các thư mục còn thiếu?"):
+                    return
+            target.mkdir(parents=True, exist_ok=True)
+            for dirname in folders.values():
+                (target / dirname).mkdir(exist_ok=True)
+            self.vars["name"].set(self.creator_name.get().strip())
+            self.vars["project_folder"].set(str(target))
+            for key, dirname in folders.items():
+                self.vars[key].set(str(target / dirname))
+            self.interview_enabled.set(False)
+            self.save_settings()
+            self.tabs.select(self.project_tab)
+            self.log("TẠO DỰ ÁN: " + str(target))
+            messagebox.showinfo("Đã tạo dự án",
+                "Đã tạo thư mục và điền đường dẫn vào Tab 01.\\n"
+                "Hãy chép Voice, TXT, ảnh, video và Interview vào từng thư mục.")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Không thể tạo dự án", str(exc))
+
+    def creator_open(self):
+        try:
+            folder = self.creator_target()
+            if not folder.is_dir():
+                messagebox.showinfo("Chưa tạo", "Hãy tạo dự án trước.")
+                return
+            os.startfile(str(folder))
+        except (OSError, ValueError, AttributeError) as exc:
+            messagebox.showerror("Mở thư mục", str(exc))
 
     def heading(self, parent, title):
         ttk.Label(
