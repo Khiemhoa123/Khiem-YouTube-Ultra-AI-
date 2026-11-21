@@ -200,6 +200,31 @@ class KhiemYoutube:
         style = ttk.Style(self.root)
         style.theme_use("clam")
 
+        # Consistent dark editor cards and native widget surfaces.
+        style.configure("TLabelframe", background=c["panel"],
+                        bordercolor="#28516B", lightcolor="#28516B",
+                        darkcolor="#28516B", relief="solid", borderwidth=1)
+        style.configure("TLabelframe.Label", background=c["panel"],
+                        foreground=c["accent"], font=("Segoe UI", 10, "bold"))
+        style.configure("TCombobox", bordercolor="#28516B",
+                        lightcolor=c["input"], darkcolor=c["input"],
+                        arrowcolor=c["accent"])
+        style.configure("TEntry", bordercolor="#28516B",
+                        lightcolor=c["input"], darkcolor=c["input"],
+                        insertcolor=c["text"])
+        style.configure("TButton", bordercolor="#28516B",
+                        lightcolor=c["input"], darkcolor=c["input"])
+        style.configure("TPanedwindow", background=c["bg"])
+        style.configure("Sash", sashthickness=6, background="#28516B")
+        style.configure("Vertical.TScrollbar", background=c["input"],
+                        troughcolor=c["bg"], arrowcolor=c["text"],
+                        bordercolor=c["panel"], lightcolor=c["input"], darkcolor=c["input"])
+        self.root.option_add("*TCombobox*Listbox.background", c["input"])
+        self.root.option_add("*TCombobox*Listbox.foreground", c["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", "#087E9B")
+        self.root.option_add("*TCombobox*Listbox.selectForeground", c["text"])
+
+
         style.configure(
             "TNotebook",
             background=c["bg"],
