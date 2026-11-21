@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import shutil
+import sys
+import importlib.util
 import subprocess
 import tempfile
 import threading
@@ -190,13 +192,29 @@ class UI:
         if not selected:
             messagebox.showinfo("Cập nhật", "Chưa chọn file để cập nhật.")
             return
+        # Install only when Vietsub modules are being updated, with user consent.
+        needs_translation = any(src.name in ("smart_vietsub_v11.py", "khiem_ui.py")
+                                for src, _, _ in selected)
+        install_translation = needs_translation and importlib.util.find_spec("deep_translator") is None
         summary = "\n".join(("Thay: " if exists else "Thêm: ") + s.name for s, _, exists in selected)
         if not messagebox.askyesno("XÁC NHẬN CẬP NHẬT",
             "Hãy đóng cửa sổ Khiêm YouTube đang chạy và đảm bảo không có dự án xuất MP4/CapCut.\n\n"
             "Sẽ sao lưu rồi cập nhật các file:\n" + summary[:2200] +
+            ("\n\nSẽ tự cài deep-translator qua pip (cần Internet) trong đúng Python của trình cập nhật." if install_translation else "") +
             "\n\nĐã đóng phần mềm và muốn tiếp tục?"):
             return
         def work():
+            if install_translation:
+                self.log("Đang cài deep-translator cho Python đang chạy trình cập nhật...")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "deep-translator"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=240,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                if result.returncode != 0:
+                    raise RuntimeError("Không cài được deep-translator. Chưa thay file phần mềm. "
+                                       + (result.stderr or result.stdout)[-1400:])
+                self.log("Đã cài deep-translator thành công.")
             stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             backup = BACKUPS / stamp
             backup.mkdir(parents=True, exist_ok=False)
