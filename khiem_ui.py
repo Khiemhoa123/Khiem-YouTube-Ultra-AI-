@@ -1553,6 +1553,10 @@ class KhiemYoutube:
         self.start(job["mode"], config_override=dict(job["config"]), from_queue=True)
 
     def open_safe_updater(self):
+        import sys
+        if getattr(sys, "frozen", False):
+            messagebox.showinfo("Bản Portable", "Bản EXE không thể cập nhật bằng file Python từ GitHub.\\nHãy chạy build_portable.py trên máy tạo bản mới rồi sao chép lại thư mục Portable.")
+            return
         if self.busy or self.queue_running:
             messagebox.showwarning("Cập nhật", "Hãy đợi dự án và hàng đợi hoàn thành trước khi cập nhật.")
             return
