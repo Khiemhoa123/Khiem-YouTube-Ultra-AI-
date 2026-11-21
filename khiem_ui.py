@@ -15,12 +15,12 @@ import app as engine
 
 
 COLORS = {
-    "bg": "#10141D",
-    "panel": "#1B2330",
-    "input": "#273548",
+    "bg": "#071321",
+    "panel": "#102437",
+    "input": "#1C354B",
     "text": "#F2F6FC",
     "muted": "#AAB9CA",
-    "accent": "#38BDF8"
+    "accent": "#13D5F5"
 }
 
 DEFAULTS = {
@@ -266,7 +266,7 @@ class KhiemYoutube:
             "TButton",
             background=c["input"],
             foreground=c["text"],
-            padding=10,
+            padding=(8, 4),
             font=("Segoe UI", 10)
         )
 
@@ -274,7 +274,7 @@ class KhiemYoutube:
             "Accent.TButton",
             background=c["accent"],
             foreground=c["bg"],
-            padding=12,
+            padding=(8, 4),
             font=("Segoe UI", 10, "bold")
         )
         style.map(
@@ -295,28 +295,17 @@ class KhiemYoutube:
             self.root,
             bg=COLORS["bg"],
             padx=25,
-            pady=16
+            pady=8
         )
         header.pack(fill="x")
 
         ttk.Button(header, text="CẬP NHẬT GITHUB", style="Accent.TButton",
                    command=self.open_safe_updater).pack(side="right", anchor="n", padx=(12, 0))
 
-        tk.Label(
-            header,
-            text="KHIÊM YOUTUBE",
-            bg=COLORS["bg"],
-            fg=COLORS["text"],
-            font=("Segoe UI", 23, "bold")
-        ).pack(anchor="w")
-
-        tk.Label(
-            header,
-            text="ULTRA AI STUDIO  v11.3",
-            bg=COLORS["bg"],
-            fg=COLORS["accent"],
-            font=("Segoe UI", 10)
-        ).pack(anchor="w")
+        tk.Label(header, text="▣  KHIÊM YOUTUBE", bg=COLORS["bg"],
+                 fg=COLORS["text"], font=("Segoe UI", 20, "bold")).pack(side="left")
+        tk.Label(header, text="  |  ULTRA AI STUDIO v11.3", bg=COLORS["bg"],
+                 fg=COLORS["accent"], font=("Segoe UI", 14, "bold")).pack(side="left")
 
         self.balance_status = tk.StringVar(value="Chưa có kết quả")
         self.scene_status = tk.StringVar(value="Chưa lập timeline")
@@ -449,7 +438,7 @@ class KhiemYoutube:
             for child in widget.winfo_children():
                 bind_project_wheel(child)
 
-        for col, weight in enumerate((5, 4, 3)):
+        for col, weight in enumerate((5, 7)):
             shell.columnconfigure(col, weight=weight, uniform="studio")
 
         def panel(col, title):
@@ -480,29 +469,39 @@ class KhiemYoutube:
                     self.vars[k].set(folder)
             ttk.Button(line, text="…", width=3, command=browse).pack(side="right", padx=(4, 0))
 
-        center = panel(1, "THAO TÁC NHANH")
+        center = panel(1, "ULTRA AI STUDIO")
+        banner = tk.Frame(center,bg="#0B1E32",highlightbackground="#176582",highlightthickness=1,padx=10,pady=7)
+        banner.pack(fill="x",pady=(0,7))
+        tk.Label(banner,text="Dựng video YouTube tự động bằng AI",bg="#0B1E32",fg="#F2F6FC",font=("Segoe UI",13,"bold")).pack(anchor="w")
+        indicators = tk.Frame(banner,bg="#0B1E32")
+        indicators.pack(anchor="w",pady=(4,0))
+        for label,var in (("CLIP",self.ai),("Whisper",self.align),("NVENC",self.gpu),("Smart Timeline",self.vars["smart_timeline"])):
+            status = tk.Label(indicators,bg="#0B1E32",font=("Segoe UI",9))
+            status.pack(side="left",padx=(0,12))
+            def refresh(*args, v=var, w=status, name=label):
+                enabled = str(v.get()).lower() in ("1","true")
+                w.configure(text=("✓ " if enabled else "○ ")+name,fg="#13D5F5" if enabled else "#AAB9CA")
+            refresh()
+            var.trace_add("write",refresh)
+        ttk.Label(center,text="THAO TÁC NHANH",foreground=COLORS["accent"],font=("Segoe UI",11,"bold")).pack(anchor="w",pady=(1,4))
         actions = ttk.Frame(center)
-        actions.pack(anchor="w", fill="x")
-        for i, (label, mode) in enumerate((("Xuất CapCut", "capcut"), ("Kiểm tra", "check"), ("Xuất MP4", "render"))):
-            button = ttk.Button(actions, text=label, width=13,
-                                style="Accent.TButton" if mode=="capcut" else "TButton",
-                                command=lambda m=mode: self.start(m))
-            button.grid(row=0, column=i, padx=2, pady=2, sticky="w")
+        actions.pack(fill="x")
+        for i in range(3):
+            actions.columnconfigure(i,weight=1,uniform="actions")
+        for i,(label,mode) in enumerate((("Xuất CapCut","capcut"),("Kiểm tra tư liệu","check"),("Xuất MP4","render"))):
+            button=ttk.Button(actions,text=label,style="Accent.TButton" if mode=="capcut" else "TButton",command=lambda m=mode:self.start(m))
+            button.grid(row=0,column=i,sticky="ew",padx=2,pady=2)
             self.buttons.append(button)
-        for i, (label, mode) in enumerate((("+ Đợi CapCut", "capcut"), ("+ Đợi MP4", "render"))):
-            ttk.Button(actions, text=label, width=13, command=lambda m=mode: self.queue_add(m)).grid(row=1,column=i,padx=2,pady=2,sticky="w")
-        ttk.Button(actions, text="Biên tập", width=13, command=lambda: self.tabs.select(self.editor_tab)).grid(row=1,column=2,padx=2,pady=2,sticky="w")
-
-        right = panel(2, "THÔNG TIN DỰ ÁN")
-        ttk.Label(right, textvariable=self.vars["name"], font=("Segoe UI", 12, "bold"),
-                  wraplength=200).pack(anchor="w", pady=8)
-        ttk.Label(right, textvariable=self.run_stage, wraplength=200).pack(anchor="w", pady=8)
-        ttk.Separator(right).pack(fill="x", pady=12)
-        self.heading(right, "Kết quả sau khi dựng")
-        for var in (self.run_elapsed, self.scene_status, self.balance_status):
-            ttk.Label(right, textvariable=var, wraplength=200).pack(anchor="w", pady=8)
-        ttk.Progressbar(right, variable=self.progress, maximum=100).pack(fill="x", pady=10)
-        ttk.Button(right, text="Mở thư mục xuất", command=self.open_output).pack(fill="x", pady=8)
+        for i,(label,mode) in enumerate((("+ Đợi CapCut","capcut"),("+ Đợi MP4","render"))):
+            ttk.Button(actions,text=label,command=lambda m=mode:self.queue_add(m)).grid(row=1,column=i,sticky="ew",padx=2,pady=2)
+        ttk.Button(actions,text="Mở thư mục xuất",command=self.open_output).grid(row=1,column=2,sticky="ew",padx=2,pady=2)
+        status_frame=ttk.Frame(center)
+        status_frame.pack(fill="x",pady=(8,0))
+        ttk.Label(status_frame,textvariable=self.run_stage,wraplength=440).pack(side="left")
+        ttk.Label(status_frame,textvariable=self.run_elapsed).pack(side="right")
+        ttk.Progressbar(center,variable=self.progress,maximum=100).pack(fill="x",pady=4)
+        for var in (self.scene_status,self.balance_status):
+            ttk.Label(center,textvariable=var,wraplength=500).pack(anchor="w",pady=1)
         bind_project_wheel(body)
 
     def build_editor(self):
@@ -644,7 +643,7 @@ class KhiemYoutube:
         self.root.after(200, lambda: self.resize_log(0.60))
         header = ttk.Frame(self.log_panel)
         header.pack(fill="x")
-        ttk.Label(header, text="NHẬT KÝ XỬ LÝ", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(header, text="NHẬT KÝ XỬ LÝ", foreground=COLORS["accent"], font=("Segoe UI", 11, "bold")).pack(side="left")
         for label, fn in (("Xóa", lambda: self.log_box.delete("1.0", "end")),
                           ("Phóng to", lambda: self.resize_log(.18)),
                           ("Thu nhỏ", lambda: self.resize_log(.88)),
