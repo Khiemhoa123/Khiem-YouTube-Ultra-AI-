@@ -67,8 +67,8 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V11.2 | ULTRA AI STUDIO")
-        self.root.geometry("1440x900")
+        self.root.title("KHIEM YOUTUBE V11.3 | ULTRA AI STUDIO")
+        self.root.geometry("1240x850")
         self.root.minsize(1000, 650)
         self.root.configure(bg=COLORS["bg"])
 
@@ -209,7 +209,7 @@ class KhiemYoutube:
             "TNotebook.Tab",
             background=c["panel"],
             foreground=c["muted"],
-            padding=(36, 12),
+            padding=(28, 8),
             font=("Segoe UI", 11, "bold")
         )
         style.map(
@@ -312,7 +312,7 @@ class KhiemYoutube:
 
         tk.Label(
             header,
-            text="ULTRA AI STUDIO  v11.2",
+            text="ULTRA AI STUDIO  v11.3",
             bg=COLORS["bg"],
             fg=COLORS["accent"],
             font=("Segoe UI", 10)
@@ -321,21 +321,15 @@ class KhiemYoutube:
         self.balance_status = tk.StringVar(value="Chưa có kết quả")
         self.scene_status = tk.StringVar(value="Chưa lập timeline")
 
-        self.tabs = ttk.Notebook(self.root)
-        self.tabs.pack(
-            fill="both",
-            expand=True,
-            padx=20,
-            pady=(0, 15)
-        )
+        self.split = ttk.Panedwindow(self.root, orient="vertical")
+        self.split.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self.tabs = ttk.Notebook(self.split)
+        self.split.add(self.tabs, weight=3)
 
         self.project_tab = ttk.Frame(
             self.tabs, padding=22
         )
         self.editor_tab = ttk.Frame(
-            self.tabs, padding=22
-        )
-        self.export_tab = ttk.Frame(
             self.tabs, padding=22
         )
 
@@ -346,10 +340,6 @@ class KhiemYoutube:
         self.tabs.add(
             self.editor_tab,
             text="02  BIÊN TẬP"
-        )
-        self.tabs.add(
-            self.export_tab,
-            text="03  XUẤT CAPCUT"
         )
 
         self.build_project()
@@ -491,13 +481,7 @@ class KhiemYoutube:
             ttk.Button(line, text="…", width=3, command=browse).pack(side="right", padx=(4, 0))
 
         center = panel(1, "ULTRA AI STUDIO")
-        banner = tk.Frame(center, bg="#092B43", padx=12, pady=24)
-        banner.pack(fill="x", pady=(0, 16))
-        tk.Label(banner, text="DỰNG VIDEO TỰ ĐỘNG", bg="#092B43",
-                 fg="#EAF8FF", font=("Segoe UI", 16, "bold")).pack()
-        tk.Label(banner, text="Kịch bản  •  Tư liệu  •  Timeline  •  CapCut",
-                 bg="#092B43", fg=COLORS["accent"], wraplength=300).pack(pady=8)
-        self.heading(center, "Tùy chọn dựng")
+        self.heading(center, "Thao tác nhanh")
         ttk.Label(center, text="Video 5–8 giây  |  Ảnh 4–6 giây").pack(anchor="w", pady=5)
         ttk.Label(center, text="Smart Timeline: tối đa 3 ảnh nếu có video phù hợp",
                   wraplength=280).pack(anchor="w", pady=5)
@@ -509,10 +493,16 @@ class KhiemYoutube:
         ttk.Entry(center, textvariable=self.vars["interview_max_seconds"]).pack(fill="x", pady=4)
         ttk.Button(center, text="Cài đặt biên tập chi tiết",
                    command=lambda: self.tabs.select(self.editor_tab)).pack(fill="x", pady=8)
-        button = ttk.Button(center, text="▶  BẮT ĐẦU DỰNG VIDEO", style="Accent.TButton",
+        button = ttk.Button(center, text="XUẤT CAPCUT", style="Accent.TButton",
                             command=lambda: self.start("capcut"))
         button.pack(fill="x", pady=(16, 6))
         self.buttons.append(button)
+        for label, mode in (("Kiểm tra tư liệu", "check"), ("Xuất MP4", "render")):
+            b = ttk.Button(center, text=label, command=lambda m=mode: self.start(m))
+            b.pack(fill="x", pady=2)
+            self.buttons.append(b)
+        ttk.Button(center, text="Thêm CapCut vào hàng đợi", command=lambda: self.queue_add("capcut")).pack(fill="x", pady=2)
+        ttk.Button(center, text="Thêm MP4 vào hàng đợi", command=lambda: self.queue_add("render")).pack(fill="x", pady=2)
 
         right = panel(2, "THÔNG TIN DỰ ÁN")
         ttk.Label(right, textvariable=self.vars["name"], font=("Segoe UI", 12, "bold"),
@@ -568,10 +558,7 @@ class KhiemYoutube:
         canvas.bind("<Leave>", disable_wheel)
         editor_body.bind("<Enter>", enable_wheel)
 
-        self.heading(
-            editor_body,
-            "Cài đặt biên tập"
-        )
+
 
         fields = [
             (
@@ -597,7 +584,7 @@ class KhiemYoutube:
             ("vz", "Zoom video (%)", None),
             (
                 "background", "Kiểu nền",
-                ["Nền đen", "Nền mờ"]
+                ["Nền đen", "Nền mờ", "Nền trắng", "Nền xám", "Nền xanh đen"]
             ),
             ("blur", "Độ mờ nền", None),
             (
@@ -606,6 +593,7 @@ class KhiemYoutube:
                     "Không",
                     "Dissolve",
                     "Fade",
+                    "Mờ đen",
                     "Slide Left",
                     "Slide Right",
                     "Blur",
@@ -632,154 +620,59 @@ class KhiemYoutube:
             )
         ]
 
-        for key, label, options in fields:
-            self.field(
-                editor_body,
-                key,
-                label,
-                options
-            )
-
-        options_frame = ttk.Frame(
-            editor_body
-        )
-        options_frame.pack(
-            fill="x",
-            pady=(14, 6)
-        )
-
-        for label, variable in [
-            ("NVIDIA NVENC", self.gpu),
-            ("AI CLIP offline", self.ai),
-            ("Whisper voice", self.align)
-        ]:
-            ttk.Checkbutton(
-                options_frame,
-                text=label,
-                variable=variable
-            ).pack(
-                side="left",
-                padx=(0, 18)
-            )
-
-        effect_frame = ttk.Frame(
-            editor_body
-        )
-        effect_frame.pack(
-            fill="x",
-            pady=5
-        )
-
-        for label, variable in self.effects.items():
-            ttk.Checkbutton(
-                effect_frame,
-                text=label,
-                variable=variable
-            ).pack(
-                side="left",
-                padx=(0, 18)
-            )
+        mapping = {k: (label, opts) for k, label, opts in fields}
+        groups = [
+            ("AI & TỶ LỆ", ("speed", "smart_timeline", "min_video_percent", "target_video_percent")),
+            ("TƯ LIỆU", ("vn", "an", "videomode", "videotime", "imagemode", "imagetime", "iz", "vz")),
+            ("HIỆU ỨNG & NỀN", ("transition", "transition_time", "background", "blur")),
+            ("CHẤT LƯỢNG", ("res", "fps"))
+        ]
+        for col in (0, 1):
+            editor_body.columnconfigure(col, weight=1, uniform="settings")
+        for i, (title, keys) in enumerate(groups):
+            card = ttk.LabelFrame(editor_body, text=title, padding=8)
+            card.grid(row=i//2, column=i%2, sticky="nsew", padx=5, pady=5)
+            card.columnconfigure(1, weight=1)
+            for row, key in enumerate(keys):
+                label, opts = mapping[key]
+                ttk.Label(card, text=label, wraplength=180).grid(row=row, column=0, sticky="w", pady=2)
+                widget = (ttk.Combobox(card, textvariable=self.vars[key], values=opts, state="readonly", width=12)
+                          if opts else ttk.Entry(card, textvariable=self.vars[key], width=12))
+                widget.grid(row=row, column=1, sticky="ew", padx=(6,0), pady=2)
+            if i == 3:
+                for j, (label, var) in enumerate([("NVENC", self.gpu), ("CLIP", self.ai), ("Whisper", self.align), *self.effects.items()]):
+                    ttk.Checkbutton(card, text=label, variable=var).grid(row=2+j//2, column=j%2, sticky="w", pady=2)
+        ttk.Label(editor_body, text="CapCut: Mờ đen native; các hiệu ứng khác dành cho MP4.", wraplength=850).grid(row=2,column=0,columnspan=2,sticky="w",pady=4)
 
     def build_export(self):
-        self.heading(
-            self.export_tab,
-            "Kiểm tra và xuất"
-        )
+        self.log_panel = ttk.Frame(self.split, padding=(8, 4))
+        self.split.add(self.log_panel, weight=2)
+        self.root.after(200, lambda: self.resize_log(0.60))
+        header = ttk.Frame(self.log_panel)
+        header.pack(fill="x")
+        ttk.Label(header, text="NHẬT KÝ XỬ LÝ", font=("Segoe UI", 11, "bold")).pack(side="left")
+        for label, fn in (("Xóa", lambda: self.log_box.delete("1.0", "end")),
+                          ("Phóng to", lambda: self.resize_log(.18)),
+                          ("Thu nhỏ", lambda: self.resize_log(.88)),
+                          ("Mặc định", lambda: self.resize_log(.60))):
+            ttk.Button(header, text=label, command=fn).pack(side="right", padx=2)
+        body = ttk.Frame(self.log_panel)
+        body.pack(fill="both", expand=True)
+        self.log_box = tk.Text(body, height=10, bg="#0D141E", fg="#DDE9F5",
+                               insertbackground="white", font=("Consolas", 11), relief="flat", wrap="word")
+        for tag, color in (("warning","#FBBF24"),("error","#F87171"),("success","#4ADE80"),("info","#DDE9F5")):
+            self.log_box.tag_configure(tag, foreground=color)
+        scroll = ttk.Scrollbar(body, orient="vertical", command=self.log_box.yview)
+        scroll.pack(side="right", fill="y")
+        self.log_box.configure(yscrollcommand=scroll.set)
+        self.log_box.pack(side="left", fill="both", expand=True)
 
-        ttk.Label(
-            self.export_tab,
-            text=(
-                "Xuất CapCut sử dụng bộ xử lý V6.8. "
-                "MP4 là tùy chọn riêng."
-            ),
-            foreground=COLORS["muted"]
-        ).pack(
-            anchor="w",
-            pady=(0, 15)
-        )
-
-        actions = ttk.Frame(
-            self.export_tab
-        )
-        actions.pack(
-            fill="x",
-            pady=8
-        )
-
-        for label, mode in [
-            ("KIỂM TRA TƯ LIỆU", "check"),
-            ("XUẤT CAPCUT", "capcut"),
-            ("XUẤT MP4", "render")
-        ]:
-            button = ttk.Button(
-                actions,
-                text=label,
-                style=(
-                    "Accent.TButton"
-                    if mode == "capcut"
-                    else "TButton"
-                ),
-                command=lambda m=mode: self.start(m)
-            )
-            button.pack(
-                side="left",
-                padx=(0, 10)
-            )
-            self.buttons.append(button)
-
-
-
-        ttk.Progressbar(
-            self.export_tab,
-            variable=self.progress,
-            maximum=100
-        ).pack(
-            fill="x",
-            pady=14
-        )
-
-        ttk.Label(self.export_tab, textvariable=self.run_elapsed,
-                  font=("Consolas", 12, "bold")).pack(anchor="w", pady=(0, 4))
-        ttk.Label(self.export_tab, textvariable=self.run_stage,
-                  wraplength=700).pack(anchor="w", pady=(0, 8))
-
-        self.log_panel = ttk.Frame(self.root, padding=(12, 6))
-        self.log_panel.pack(fill="x", padx=20, pady=(0, 12))
-        log_header = ttk.Frame(self.log_panel)
-        log_header.pack(fill="x")
-        ttk.Label(log_header, text="NHẬT KÝ XỬ LÝ", font=("Segoe UI", 11, "bold")).pack(side="left")
-        ttk.Button(log_header, text="Xóa nhật ký", command=lambda: self.log_box.delete("1.0", "end")).pack(side="right")
-        self.log_box = tk.Text(
-            self.log_panel,
-            height=6,
-            bg="#0D141E",
-            fg="#DDE9F5",
-            insertbackground="white",
-            font=("Consolas", 10),
-            relief="flat",
-            wrap="word"
-        )
-        self.log_box.tag_configure("warning", foreground="#FBBF24")
-        self.log_box.tag_configure("error", foreground="#F87171")
-        self.log_box.tag_configure("success", foreground="#4ADE80")
-        self.log_box.tag_configure("info", foreground="#DDE9F5")
-        self.log_box.pack(
-            fill="both",
-            expand=True
-        )
-
-        ttk.Button(
-            self.export_tab,
-            text="Mở thư mục xuất",
-            command=self.open_output
-        ).pack(
-            anchor="e",
-            pady=12
-        )
+    def resize_log(self, fraction):
+        self.split.sashpos(0, int(self.split.winfo_height()*fraction))
 
     def build_queue(self):
         self.queue_tab = ttk.Frame(self.tabs, padding=12)
-        self.tabs.add(self.queue_tab, text="04  HÀNG ĐỢI")
+        self.tabs.add(self.queue_tab, text="03  HÀNG ĐỢI")
         self.heading(self.queue_tab, "Dự án chạy lần lượt, lỗi tự chuyển dự án sau")
         top = ttk.Frame(self.queue_tab)
         top.pack(fill="x", pady=5)
@@ -1146,7 +1039,7 @@ class KhiemYoutube:
             )
 
         self.tabs.select(
-            self.export_tab
+            self.project_tab
         )
 
         self.log(
