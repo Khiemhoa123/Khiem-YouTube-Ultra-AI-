@@ -103,14 +103,14 @@ def export(c,parts,log):
     sec,ms=tail.split(',')
     return (int(h)*3600+int(m)*60+int(sec))*1000000+int(ms.ljust(3,'0')[:3])*1000
    raw_srt=subtitle_path.read_text(encoding='utf-8-sig')
-   for block in re.split(r'\\n\\s*\\n',raw_srt.strip()):
+   for block in re.split(r'\n\s*\n',raw_srt.strip()):
     lines=block.strip().splitlines()
     times=next((line for line in lines if ' --> ' in line),None)
     if not times:continue
     idx=lines.index(times); start_text,end_text=times.split(' --> ',1)
     start_us=stamp(start_text.strip()); end_us=stamp(end_text.strip().split()[0])
     if end_us<=start_us:continue
-    caption='\\n'.join(lines[idx+1:]).strip()
+    caption='\n'.join(lines[idx+1:]).strip()
     if not caption:continue
     mat=copy.deepcopy(ref['text_material']); mat['id']=uid()
     mat['name']='VIETSUB KIEM TRA'
