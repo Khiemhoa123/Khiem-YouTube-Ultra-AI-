@@ -445,6 +445,20 @@ class KhiemYoutube:
         win = body.create_window((0, 0), window=shell, anchor="nw")
         shell.bind("<Configure>", lambda e: body.configure(scrollregion=body.bbox("all")))
         body.bind("<Configure>", lambda e: body.itemconfigure(win, width=e.width))
+        def project_wheel(event):
+            if self.tabs.select() != str(self.project_tab):
+                return
+            delta = getattr(event, "delta", 0)
+            step = -1 if delta > 0 or getattr(event, "num", 0) == 4 else 1
+            body.yview_scroll(step * 3, "units")
+            return "break"
+
+        def bind_project_wheel(widget):
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequence, project_wheel, add="+")
+            for child in widget.winfo_children():
+                bind_project_wheel(child)
+
         for col, weight in enumerate((3, 5, 3)):
             shell.columnconfigure(col, weight=weight, uniform="studio")
 
@@ -510,6 +524,7 @@ class KhiemYoutube:
             ttk.Label(right, textvariable=var, wraplength=200).pack(anchor="w", pady=8)
         ttk.Progressbar(right, variable=self.progress, maximum=100).pack(fill="x", pady=10)
         ttk.Button(right, text="Mở thư mục xuất", command=self.open_output).pack(fill="x", pady=8)
+        bind_project_wheel(body)
 
     def build_editor(self):
         # Scrollable editor: works on smaller displays and with mouse wheel.
