@@ -39,8 +39,8 @@ def discover(root, interview=None):
         elif suffix in VIDEOS and p.resolve() != interview_path:
             result["videos"].append(p)
     def _name_key(path):
-        stem = re.sub(r"^\\s*\\d+\\s*[-_. ]*", "", path.stem.lower())
-        stem = re.sub(r"(?:[-_. ]+(?:full|final|voice|audio|copy|backup|bak|v\\d+))+$", "", stem)
+        stem = re.sub(r"^\s*\d+\s*[-_. ]*", "", path.stem.lower())
+        stem = re.sub(r"(?:[-_. ]+(?:full|final|voice|audio|copy|backup|bak|v\d+))+$", "", stem)
         return re.sub(r"[^a-z0-9]+", "", stem)
 
     def _rank(path, opposite):
@@ -54,10 +54,33 @@ def discover(root, interview=None):
         final = bool(re.search(r"(?:^|[-_. ])(?:full|final)(?:$|[-_. ])", name))
         return (int(size > 0), int(paired), int(not bad), int(final), size, str(path).casefold())
 
+    # Reject empty/unreadable candidates before ranking. An unusable duplicate
+    # must not win just because it has a better filename.
+    for kind in ("voice", "txt"):
+        for n, files in list(candidates[kind].items()):
+            usable = []
+            for p in files:
+                try:
+                    with p.open("rb") as handle:
+                        head = handle.read(16)
+                    if not head:
+                        raise ValueError("empty file")
+                    if kind == "txt":
+                        p.read_text(encoding="utf-8-sig")
+                    usable.append(p)
+                except (OSError, UnicodeError, ValueError) as exc:
+                    result["duplicates"].append({
+                        "kind": kind, "number": n, "selected": None,
+                        "ignored": [str(p)], "reason": str(exc)
+                    })
+            candidates[kind][n] = usable
+
     for kind in ("voice", "txt"):
         other = "txt" if kind == "voice" else "voice"
         for n, files in candidates[kind].items():
             ranked = sorted(files, key=lambda p: _rank(p, candidates[other].get(n, [])), reverse=True)
+            if not ranked:
+                continue
             result[kind][n] = ranked[0]
             if len(ranked) > 1:
                 result["duplicates"].append({
