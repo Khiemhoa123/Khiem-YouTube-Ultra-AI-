@@ -426,6 +426,84 @@ def find_coccoc():
                 if p.is_file(): return str(p)
     return ""
 
+
+def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
+    import pyautogui as gui
+    from PIL import Image
+    import shutil
+    if not person.strip():
+        raise ValueError("Nhập tên nhân vật chính.")
+    if inbox==root or root in inbox.parents or inbox in root.parents:
+        raise ValueError("Thư mục nhận phải nằm riêng ngoài dự án.")
+    parts=plan(key,vr,ni,0,sr,log)
+    known=set()
+    for p in root.rglob("*"):
+        if stop.is_set(): return
+        if p.is_file() and p.suffix.lower() in IMG and p.stat().st_size<=30*1024**2:
+            known.add(hashlib.sha256(p.read_bytes()).hexdigest())
+    for part in parts:
+        if stop.is_set(): return
+        n=part["number"]
+        matches=[p for p in root.iterdir() if p.is_dir() and section(p)==n]
+        if len(matches)>1: raise ValueError("Trùng thư mục phần "+str(n))
+        folder=matches[0] if matches else root/f"{n:02d}"
+        folder.mkdir(exist_ok=True)
+        if folder.resolve().parent!=root: raise ValueError("Thư mục ngoài dự án.")
+        target=ni if part["duration"] is None else min(120,max(ni,math.ceil(part["duration"]/6*1.15)))
+        count=sum(p.is_file() and p.suffix.lower() in IMG for p in folder.rglob("*"))
+        queries=list(dict.fromkeys([person]+[person+" "+q for q in part["queries"][:4]]))
+        for q in queries:
+            if stop.is_set() or count>=target: break
+            before={p.name for p in inbox.iterdir()}
+            url="https://www.google.com/search?tbm=isch&q="+quote_plus(q)
+            subprocess.Popen([str(browser),"--new-window",url])
+            log(f"Phần {n:02d}: {count}/{target} | {q}")
+            if stop.wait(8): return
+            gui.hotkey(*hotkey)
+            if stop.wait(6): return
+            for x,y in points:
+                if stop.is_set(): return
+                gui.click(x,y)
+                if stop.wait(2): return
+            deadline=time.monotonic()+90
+            stable={}
+            last_new=time.monotonic()
+            while time.monotonic()<deadline and count<target:
+                if stop.wait(1): return
+                for p in inbox.iterdir():
+                    if stop.is_set() or count>=target: break
+                    if p.name in before or not p.is_file() or p.suffix.lower() not in IMG: continue
+                    try:
+                        size=p.stat().st_size
+                        if stable.get(p.name)!=size:
+                            stable[p.name]=size
+                            continue
+                        if not 0<size<=30*1024**2:
+                            before.add(p.name); continue
+                        with Image.open(p) as im:
+                            if im.width<640 or im.height<360 or im.width*im.height>40000000:
+                                before.add(p.name); continue
+                            ext={"JPEG":".jpg","PNG":".png","WEBP":".webp"}.get(im.format)
+                            im.verify()
+                        before.add(p.name)
+                        if not ext: continue
+                        digest=hashlib.sha256(p.read_bytes()).hexdigest()
+                        if digest in known: continue
+                        dest=folder/("imageye_"+digest[:24]+ext)
+                        shutil.copy2(p,dest)
+                        known.add(digest); count+=1; last_new=time.monotonic()
+                        with (folder/"_browser_sources.jsonl").open("a",encoding="utf-8") as f:
+                            f.write(json.dumps({"file":dest.name,"search":url,"original_filename":p.name,"rights":"user review required"},ensure_ascii=False)+"\n")
+                        log(f"Phần {n:02d}: {count}/{target} ảnh")
+                    except (OSError,ValueError) as e: log("Bỏ qua: "+str(e))
+                if count and time.monotonic()-last_new>25 and not any(p.suffix==".crdownload" for p in inbox.iterdir()): break
+            if count<target and time.monotonic()-last_new>=25:
+                log("Không đủ ảnh mới. Dừng an toàn, kiểm tra Imageye và vị trí nút.")
+                return
+        log(f"Phần {n:02d}: {count}/{target} ảnh. Kiểm tra nhân vật và quyền sử dụng.")
+    log("Kết thúc Imageye. Kiểm tra số lượng từng phần.")
+
+
 def add_tab(notebook):
     frame=ttk.Frame(notebook,padding=12)
     notebook.add(frame,text="05  TẢI TƯ LIỆU AI")
@@ -439,11 +517,14 @@ def add_tab(notebook):
     browser_mode=tk.BooleanVar(value=True)
     browser_path=tk.StringVar(value=find_coccoc())
     inbox_path=tk.StringVar(value=str(Path.home()/"Downloads"))
-    source=tk.StringVar(value="Openverse tự động")
+    source=tk.StringVar(value="Imageye tự động")
+    person=tk.StringVar()
+    hotkey=tk.StringVar(value="ctrl+shift+y")
+    coords=tk.StringVar()
     advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
-    ttk.Label(frame,text="SMART AUTO MEDIA V4.0 | Openverse tự động hoặc Imageye hỗ trợ").pack(anchor="w")
+    ttk.Label(frame,text="SMART AUTO MEDIA V4.1 | IMAGEYE AUTO CONTROL - thử nghiệm").pack(anchor="w")
     def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
@@ -456,10 +537,13 @@ def add_tab(notebook):
     picker("Thư mục lưu",path)
     picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
-    ttk.Checkbutton(frame,text="Openverse / Cốc Cốc + Imageye (bỏ chọn để dùng Commons)",variable=browser_mode).pack(anchor="w")
+    for label,var in [("Tên nhân vật chính",person),("Phím tắt Imageye đã cài trong trình duyệt",hotkey),("Tọa độ nút chọn và tải: x,y;x,y",coords)]:
+        row=ttk.Frame(frame); row.pack(fill="x")
+        ttk.Label(row,text=label).pack(side="left")
+        ttk.Entry(row,textvariable=var).pack(side="left",fill="x",expand=True)
     picker("Cốc Cốc (browser.exe)",browser_path,True,[("EXE","*.exe")])
     picker("Thư mục nhận ảnh tải xuống",inbox_path)
-    ttk.Combobox(frame,textvariable=source,values=["Openverse tự động","Google","Getty"],state="readonly").pack(anchor="w")
+    ttk.Combobox(frame,textvariable=source,values=["Imageye tự động","Google","Getty"],state="readonly").pack(anchor="w")
     counts=ttk.Frame(frame); counts.pack(fill="x")
     ttk.Label(counts,text="Không có Voice/TXT: ảnh/phần").pack(side="left")
     ttk.Entry(counts,textvariable=image_count,width=5).pack(side="left")
@@ -468,7 +552,7 @@ def add_tab(notebook):
     row=ttk.Frame(frame); row.pack(fill="x")
     for label,value in [("Ảnh","image"),("Video","video"),("Ảnh + Video","both")]:
         ttk.Radiobutton(row,text=label,variable=mode,value=value).pack(side="left")
-    ttk.Label(frame,text="Openverse: tự tải ảnh. Google/Getty: dùng Imageye và bấm NHẬN ẢNH / TIẾP.").pack(anchor="w",pady=5)
+    ttk.Label(frame,text="Imageye thử nghiệm: cài pyautogui, Pillow, đặt phím tắt và tọa độ. Rê chuột góc trên trái để dừng khẩn cấp.").pack(anchor="w",pady=5)
     buttons=ttk.Frame(frame); buttons.pack(fill="x")
     output=tk.Text(frame,height=14,wrap="word"); output.pack(fill="both",expand=True,pady=8)
     def start():
@@ -496,11 +580,21 @@ def add_tab(notebook):
             events.put("Openverse tự động chỉ hỗ trợ ảnh."); return
         if use_browser and src!="Openverse tự động" and (not exe.is_file() or not inbox.is_dir() or selected!="image"):
             events.put("Chọn browser.exe Cốc Cốc, thư mục nhận và chế độ Ảnh."); return
+        main_person=person.get().strip()
+        keys=hotkey.get().lower().split("+")
+        points=[]
+        if src=="Imageye tự động":
+            try:
+                if not main_person: raise ValueError("Nhập tên nhân vật chính.")
+                points=[tuple(map(int,p.split(","))) for p in coords.get().split(";")]
+                if not points or any(len(p)!=2 or min(p)<0 for p in points): raise ValueError("Tọa độ không hợp lệ.")
+            except ValueError as e:
+                events.put("Kiểm tra tên và tọa độ x,y;x,y: "+str(e)); return
         events.put("Chế độ: "+(("Openverse tự động" if src=="Openverse tự động" else "Cốc Cốc + Imageye | "+src) if use_browser else "Wikimedia Commons"))
         stop.clear(); button.configure(state="disabled")
         def worker():
             try:
-                if use_browser and src=="Openverse tự động": auto_openverse(root,key,vr,sr,ni,nv,stop,events.put)
+                if src=="Imageye tự động": imageye_auto(root,key,vr,sr,ni,inbox,exe,main_person,keys,points,stop,events.put)
                 elif use_browser: browser_images(root,key,vr,sr,ni,nv,inbox,exe,src,stop,events.put,advance)
                 else: run(root,selected,stop,events.put,key,vr,ni,nv,sr)
             except Exception as e: events.put("Lỗi: "+str(e))
