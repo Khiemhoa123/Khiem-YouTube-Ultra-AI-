@@ -276,6 +276,63 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
         log("Phần %02d: %d ảnh, %d cảnh video ước tính. Cần xem lại đúng nhân vật và quyền sử dụng."%(n,images,videos))
     log("Dừng do giới hạn Commons. Mở danh sách tìm kiếm để bổ sung." if commons_blocked else "Hoàn thành tìm tải. Kiểm tra số lượng thực tế từng phần.")
 
+
+def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log, advance):
+    from PIL import Image
+    import shutil
+    parts=plan(key,vr,ni,nv,sr,log)
+    if inbox==root or root in inbox.parents or inbox in root.parents:
+        raise ValueError("Chọn thư mục Downloads riêng, không nằm trong dự án.")
+    known=set()
+    for p in root.rglob("*"):
+        if stop.is_set(): return
+        if p.is_file() and p.suffix.lower() in IMG:
+            with p.open("rb") as f:
+                known.add(hashlib.sha256(f.read()).hexdigest())
+    for part in parts:
+        if stop.is_set(): return
+        n=part["number"]
+        matches=[p for p in root.iterdir() if p.is_dir() and section(p)==n]
+        if len(matches)>1: raise ValueError("Trùng thư mục phần "+str(n))
+        folder=matches[0] if matches else root/("%02d"%n)
+        folder.mkdir(exist_ok=True)
+        if folder.resolve().parent!=root: raise ValueError("Thư mục ngoài dự án.")
+        target=ni if part["duration"] is None else min(120,math.ceil(part["duration"]/6*1.15))
+        count=sum(p.is_file() and p.suffix.lower() in IMG for p in folder.rglob("*"))
+        for q in part["queries"]:
+            if stop.is_set() or count>=target: break
+            before={p.name for p in inbox.iterdir()}
+            url=("https://www.gettyimages.com/photos/"+quote_plus(q).replace("+","-") if source=="Getty" else "https://www.google.com/search?tbm=isch&q="+quote_plus(q))
+            advance.clear()
+            subprocess.Popen([str(browser),url])
+            log(f"Phần {n:02d} | {part['title']} | {count}/{target} ảnh")
+            log("Cốc Cốc: "+q)
+            log("Dùng Imageye tải ảnh có quyền sử dụng vào thư mục nhận. Đợi tải xong rồi bấm NHẬN ẢNH / TIẾP.")
+            while not advance.wait(0.5):
+                if stop.is_set(): return
+            if stop.is_set(): return
+            for p in sorted(inbox.iterdir()):
+                if stop.is_set() or count>=target: break
+                if p.name in before or not p.is_file() or p.suffix.lower() not in IMG: continue
+                try:
+                    with Image.open(p) as im:
+                        w,h=im.size
+                        if w<640 or h<360: log("Bỏ ảnh nhỏ: "+p.name); continue
+                        im.verify()
+                    if p.stat().st_size>30*1024**2: continue
+                    digest=hashlib.sha256(p.read_bytes()).hexdigest()
+                    if digest in known: log("Trùng ảnh: "+p.name); continue
+                    dest=folder/("browser_"+digest[:20]+p.suffix.lower())
+                    shutil.copy2(p,dest)
+                    known.add(digest); count+=1
+                    with (folder/"_browser_sources.jsonl").open("a",encoding="utf-8") as f:
+                        f.write(json.dumps({"file":dest.name,"search":url,"original_filename":p.name,"rights":"user review required"},ensure_ascii=False)+"\n")
+                    log(f"Đã nhận {count}/{target}: {p.name}")
+                except (OSError,ValueError) as e: log("Bỏ qua: "+str(e))
+        log(f"Phần {n:02d}: {count}/{target} ảnh. Kiểm tra nhân vật và giấy phép.")
+    log("Kết thúc nhận ảnh. Ảnh gốc vẫn nằm trong thư mục tải.")
+
+
 def add_tab(notebook):
     frame=ttk.Frame(notebook,padding=12)
     notebook.add(frame,text="05  TẢI TƯ LIỆU AI")
@@ -286,21 +343,30 @@ def add_tab(notebook):
     image_count=tk.StringVar(value="20")
     video_count=tk.StringVar(value="5")
     mode=tk.StringVar(value="both")
+    browser_mode=tk.BooleanVar(value=False)
+    browser_path=tk.StringVar()
+    inbox_path=tk.StringVar(value=str(Path.home()/"Downloads"))
+    source=tk.StringVar(value="Google")
+    advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
     ttk.Label(frame,text="Tải tư liệu Wikimedia Commons từ KEY TXT độc lập").pack(anchor="w")
-    def picker(label,var,is_file=False):
+    def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
         ttk.Entry(row,textvariable=var).pack(side="left",fill="x",expand=True)
         def choose():
-            p=filedialog.askopenfilename(filetypes=[("TXT","*.txt")]) if is_file else filedialog.askdirectory()
+            p=filedialog.askopenfilename(filetypes=types or [("TXT","*.txt")]) if is_file else filedialog.askdirectory()
             if p: var.set(p)
         ttk.Button(row,text="Chọn",command=choose).pack(side="left")
     picker("File KEY TXT",key_path,True)
     picker("Thư mục lưu",path)
     picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
+    ttk.Checkbutton(frame,text="Cốc Cốc + Imageye (nhận ảnh thủ công)",variable=browser_mode).pack(anchor="w")
+    picker("Cốc Cốc (browser.exe)",browser_path,True,[("EXE","*.exe")])
+    picker("Thư mục nhận ảnh tải xuống",inbox_path)
+    ttk.Combobox(frame,textvariable=source,values=["Google","Getty"],state="readonly").pack(anchor="w")
     counts=ttk.Frame(frame); counts.pack(fill="x")
     ttk.Label(counts,text="Không có Voice/TXT: ảnh/phần").pack(side="left")
     ttk.Entry(counts,textvariable=image_count,width=5).pack(side="left")
@@ -329,14 +395,23 @@ def add_tab(notebook):
         except Exception as e:
             events.put("Lỗi: "+str(e)); return
         selected=mode.get()
+        use_browser=browser_mode.get()
+        src=source.get()
+        exe=Path(browser_path.get())
+        inbox=Path(inbox_path.get()).resolve()
+        if use_browser and (not exe.is_file() or not inbox.is_dir() or selected!="image"):
+            events.put("Chọn browser.exe Cốc Cốc, thư mục nhận và chế độ Ảnh."); return
         stop.clear(); button.configure(state="disabled")
         def worker():
-            try: run(root,selected,stop,events.put,key,vr,ni,nv,sr)
+            try:
+                if use_browser: browser_images(root,key,vr,sr,ni,nv,inbox,exe,src,stop,events.put,advance)
+                else: run(root,selected,stop,events.put,key,vr,ni,nv,sr)
             except Exception as e: events.put("Lỗi: "+str(e))
             finally: events.put(None)
         threading.Thread(target=worker,daemon=True).start()
     button=ttk.Button(buttons,text="BẮT ĐẦU TẢI",command=start);button.pack(side="left")
     ttk.Button(buttons,text="DỪNG",command=stop.set).pack(side="left")
+    ttk.Button(buttons,text="NHẬN ẢNH / TIẾP",command=advance.set).pack(side="left")
     def open_links():
         p=Path(path.get()).resolve()/"_media_search.html"
         if p.is_file(): webbrowser.open(p.as_uri())
