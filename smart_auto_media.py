@@ -345,6 +345,78 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
     log("Kết thúc nhận ảnh. Ảnh gốc vẫn nằm trong thư mục tải.")
 
 
+
+def auto_openverse(root,key,vr,sr,ni,nv,stop,log):
+    from PIL import Image
+    import io
+    parts=plan(key,vr,ni,nv,sr,log)
+    known=set()
+    for p in root.rglob("*"):
+        if stop.is_set(): return
+        if p.is_file() and p.suffix.lower() in IMG:
+            if p.stat().st_size<=30*1024**2:
+                known.add(hashlib.sha256(p.read_bytes()).hexdigest())
+    for part in parts:
+        if stop.is_set(): return
+        n=part["number"]
+        matches=[p for p in root.iterdir() if p.is_dir() and section(p)==n]
+        if len(matches)>1: raise ValueError("Trùng thư mục phần "+str(n))
+        folder=matches[0] if matches else root/("%02d"%n)
+        folder.mkdir(exist_ok=True)
+        if folder.resolve().parent!=root: raise ValueError("Thư mục ngoài dự án.")
+        target=ni if part["duration"] is None else min(120,math.ceil(part["duration"]/6*1.15))
+        count=sum(p.is_file() and p.suffix.lower() in IMG for p in folder.rglob("*"))
+        person=part["title"].split("|")[-1].strip() if "|" in part["title"] else ""
+        queries=list(dict.fromkeys(([person] if person else [])+part["queries"]))
+        log(f"Phần {n:02d}: {count}/{target} ảnh | {folder}")
+        for q in queries:
+            if stop.is_set() or count>=target: break
+            log("Openverse: "+q)
+            try:
+                data=request_json("https://api.openverse.org/v1/images/?"+urlencode({"q":q,"page_size":20,"license":"cc0,pdm,by,by-sa"}),stop)
+            except RateLimited as e:
+                log("Openverse giới hạn truy cập. Dừng và giữ ảnh đã tải: "+str(e)); return
+            except Exception as e:
+                log("Lỗi tìm kiếm: "+str(e)); continue
+            results=data.get("results",[])
+            log(f"Nhận {len(results)} ứng viên.")
+            for item in results:
+                if stop.is_set() or count>=target: break
+                if item.get("license") not in ("cc0","pdm","by","by-sa"): continue
+                if person and not all(w in str(item.get("title","")).casefold() for w in person.casefold().split()): continue
+                url=item.get("url") or ""
+                if urlparse(url).scheme!="https": continue
+                log("Kiểm tra: "+str(item.get("title","")))
+                try:
+                    if stop.wait(2): return
+                    with urlopen(Request(url,headers={"User-Agent":UA}),timeout=20) as response:
+                        if urlparse(response.geturl()).scheme!="https": continue
+                        raw=response.read(20*1024**2+1)
+                    if len(raw)>20*1024**2: continue
+                    digest=hashlib.sha256(raw).hexdigest()
+                    if digest in known: continue
+                    with Image.open(io.BytesIO(raw)) as im:
+                        if im.width<640 or im.height<360 or im.width*im.height>40000000: continue
+                        ext={"JPEG":".jpg","PNG":".png","WEBP":".webp"}.get(im.format)
+                        if not ext: continue
+                        im.verify()
+                    dest=folder/("openverse_"+digest[:24]+ext)
+                    if dest.exists(): continue
+                    with (folder/"_openverse_credits.jsonl").open("a",encoding="utf-8") as f:
+                        f.write(json.dumps({"file":dest.name,"source":item.get("foreign_landing_url"),"url":url,"license":item.get("license"),"license_url":item.get("license_url"),"creator":item.get("creator"),"title":item.get("title")},ensure_ascii=False)+"\n")
+                    dest.write_bytes(raw)
+                    known.add(digest); count+=1
+                    log(f"Đã tải {count}/{target}: {dest.name}")
+                except HTTPError as e:
+                    if e.code==429:
+                        log("Nguồn ảnh giới hạn truy cập, dừng để tránh gửi quá nhiều yêu cầu."); return
+                    log("Bỏ ứng viên: "+str(e))
+                except Exception as e:
+                    log("Bỏ ứng viên: "+str(e))
+        log(f"Phần {n:02d}: {count}/{target}. "+("Đủ số lượng." if count>=target else "Thiếu ảnh phù hợp.")+" Kiểm tra nhân vật và giấy phép.")
+    log("Kết thúc tải tự động Openverse.")
+
+
 def find_coccoc():
     for env in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"):
         base=os.environ.get(env)
@@ -367,11 +439,11 @@ def add_tab(notebook):
     browser_mode=tk.BooleanVar(value=True)
     browser_path=tk.StringVar(value=find_coccoc())
     inbox_path=tk.StringVar(value=str(Path.home()/"Downloads"))
-    source=tk.StringVar(value="Google")
+    source=tk.StringVar(value="Openverse tự động")
     advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
-    ttk.Label(frame,text="SMART BROWSER MEDIA V3.1 | Cốc Cốc + Imageye mặc định").pack(anchor="w")
+    ttk.Label(frame,text="SMART AUTO MEDIA V4.0 | Openverse tự động hoặc Imageye hỗ trợ").pack(anchor="w")
     def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
@@ -384,10 +456,10 @@ def add_tab(notebook):
     picker("Thư mục lưu",path)
     picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
-    ttk.Checkbutton(frame,text="Cốc Cốc + Imageye (bỏ chọn để dùng Commons)",variable=browser_mode).pack(anchor="w")
+    ttk.Checkbutton(frame,text="Openverse / Cốc Cốc + Imageye (bỏ chọn để dùng Commons)",variable=browser_mode).pack(anchor="w")
     picker("Cốc Cốc (browser.exe)",browser_path,True,[("EXE","*.exe")])
     picker("Thư mục nhận ảnh tải xuống",inbox_path)
-    ttk.Combobox(frame,textvariable=source,values=["Google","Getty"],state="readonly").pack(anchor="w")
+    ttk.Combobox(frame,textvariable=source,values=["Openverse tự động","Google","Getty"],state="readonly").pack(anchor="w")
     counts=ttk.Frame(frame); counts.pack(fill="x")
     ttk.Label(counts,text="Không có Voice/TXT: ảnh/phần").pack(side="left")
     ttk.Entry(counts,textvariable=image_count,width=5).pack(side="left")
@@ -396,7 +468,7 @@ def add_tab(notebook):
     row=ttk.Frame(frame); row.pack(fill="x")
     for label,value in [("Ảnh","image"),("Video","video"),("Ảnh + Video","both")]:
         ttk.Radiobutton(row,text=label,variable=mode,value=value).pack(side="left")
-    ttk.Label(frame,text="Imageye: tự mở tìm kiếm, bạn tải ảnh có quyền sử dụng rồi bấm NHẬN ẢNH / TIẾP.").pack(anchor="w",pady=5)
+    ttk.Label(frame,text="Openverse: tự tải ảnh. Google/Getty: dùng Imageye và bấm NHẬN ẢNH / TIẾP.").pack(anchor="w",pady=5)
     buttons=ttk.Frame(frame); buttons.pack(fill="x")
     output=tk.Text(frame,height=14,wrap="word"); output.pack(fill="both",expand=True,pady=8)
     def start():
@@ -420,13 +492,16 @@ def add_tab(notebook):
         src=source.get()
         exe=Path(browser_path.get())
         inbox=Path(inbox_path.get()).resolve()
-        if use_browser and (not exe.is_file() or not inbox.is_dir() or selected!="image"):
+        if use_browser and src=="Openverse tự động" and selected!="image":
+            events.put("Openverse tự động chỉ hỗ trợ ảnh."); return
+        if use_browser and src!="Openverse tự động" and (not exe.is_file() or not inbox.is_dir() or selected!="image"):
             events.put("Chọn browser.exe Cốc Cốc, thư mục nhận và chế độ Ảnh."); return
-        events.put("Chế độ: "+("Cốc Cốc + Imageye | "+src if use_browser else "Wikimedia Commons"))
+        events.put("Chế độ: "+(("Openverse tự động" if src=="Openverse tự động" else "Cốc Cốc + Imageye | "+src) if use_browser else "Wikimedia Commons"))
         stop.clear(); button.configure(state="disabled")
         def worker():
             try:
-                if use_browser: browser_images(root,key,vr,sr,ni,nv,inbox,exe,src,stop,events.put,advance)
+                if use_browser and src=="Openverse tự động": auto_openverse(root,key,vr,sr,ni,nv,stop,events.put)
+                elif use_browser: browser_images(root,key,vr,sr,ni,nv,inbox,exe,src,stop,events.put,advance)
                 else: run(root,selected,stop,events.put,key,vr,ni,nv,sr)
             except Exception as e: events.put("Lỗi: "+str(e))
             finally: events.put(None)
