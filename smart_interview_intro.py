@@ -141,95 +141,97 @@ def prepend_mp4(c, intro, log):
 
 
 def insert_interview_cutaways(parts, intro, c, log):
-    """Insert several silent two-second interview cutaways per numbered section.
+    """Silent two-second interview cutaways with global spacing and source dedup.
 
-    All timestamps are narration-relative. Audio remains untouched; CapCut and
-    MP4 exporters consume the same modified scene plan.
+    The manually selected interview is the only cutaway source. Identity cannot
+    be verified automatically, so source identity must be checked by the editor.
     """
+    import copy
     if not intro or not c.get("interview_enabled", False):
         return parts
-    import copy
-
     source = str(intro["source"])
     try:
         info = _probe(source)
-        source_length = float(info.get("format", {}).get("duration", 0) or 0)
+        length = float(info.get("format", {}).get("duration", 0) or 0)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        log("CẢNH BÁO: Không thể tạo cutaway interview: " + str(exc))
+        log("CẢNH BÁO: Không phân tích được interview: " + str(exc))
         return parts
-    if source_length < 2.0:
-        log("CẢNH BÁO: Interview ngắn hơn 2 giây, bỏ qua cutaway.")
+    if length < 2.0:
         return parts
-
     fps = max(1, int(round(float(c.get("fps", 30)))))
     cut_frames = 2 * fps
-    minimum_gap = 45.0
-    last_cutaway_end = float("-inf")
-    next_source = float(intro.get("source_start", 0)) + float(intro["duration"]) + 1.0
-    total_count = 0
+    gap = 45.0
+    # Reserve the intro source interval; never use it as a cutaway.
+    used_source = [(float(intro.get("source_start", 0)),
+                    float(intro.get("source_start", 0)) + float(intro["duration"]))]
+    global_cutaways = []
+    count = 0
 
-    for p in parts:
+    def get_source():
+        # Search disjoint two-second windows with safety padding on both sides.
+        for n in range(int(max(0, length - 2) // 3) + 1):
+            st = float(n * 3)
+            if st + 2 > length:
+                break
+            if all(st >= end + 1 or st + 2 <= start - 1
+                   for start, end in used_source):
+                used_source.append((st, st + 2))
+                return st
+        return None
+
+    # Work in absolute timeline coordinates. Re-evaluate candidates after
+    # each insertion and do not rely on the order of Number processing.
+    for p in sorted(parts, key=lambda part: float(part.get("clips", [{}])[0].get("start", 0))):
         clips = p.get("clips", [])
         duration = float(p.get("duration", 0))
-        if not clips or duration < 20:
+        if not clips or duration < 35:
             continue
-        part_start = float(clips[0]["start"])
+        part_start = min(float(x["start"]) for x in clips)
         part_end = part_start + duration
-        # One cutaway per roughly 55 seconds, capped at four per Number.
-        target = min(4, max(1, int(duration / 55.0 + 0.5)))
-        placed = []
+        target = min(4, max(1, int(duration / 55 + 0.5)))
+        inserted = 0
         for k in range(target):
             desired = part_start + duration * (k + 1) / (target + 1)
-            choices = []
+            candidates = []
             for index, clip in enumerate(clips):
                 frames = int(clip.get("frames", 0))
                 if frames < cut_frames + 2 * fps:
                     continue
                 before = (frames - cut_frames) // 2
-                cut_start = float(clip["start"]) + before / fps
-                if cut_start - part_start < 5 or part_end - (cut_start + 2) < 5:
+                t = float(clip["start"]) + before / fps
+                if t < part_start + 5 or t + 2 > part_end - 5:
                     continue
-                if cut_start - last_cutaway_end < minimum_gap:
+                if any(not (t >= other + 2 + gap or other >= t + 2 + gap)
+                       for other in global_cutaways):
                     continue
-                if any(abs(cut_start - t) < minimum_gap + 2 for t in placed):
-                    continue
-                choices.append((abs(cut_start - desired), index, before, cut_start))
-            if not choices:
+                candidates.append((abs(t - desired), index, before, t))
+            if not candidates:
                 continue
-            _, index, before, cut_start = min(choices)
+            source_start = get_source()
+            if source_start is None:
+                log("CẢNH BÁO: Hết đoạn interview chưa sử dụng, không lặp cảnh.")
+                break
+            _, index, before, t = min(candidates)
             clip = clips[index]
             after = int(clip["frames"]) - before - cut_frames
-            if before < 1 or after < 1:
-                continue
-
-            if next_source + 2 > source_length:
-                next_source = max(0.0, float(intro.get("source_start", 0)) - 3.0)
-            if next_source + 2 > source_length:
-                next_source = 0.0
-            if next_source + 2 > source_length:
-                break
-
             first = copy.deepcopy(clip)
             first["frames"] = before
             first["duration"] = before / fps
             cut = dict(part=clip.get("part", p.get("number")), type="video",
-                       source=source, source_start=next_source,
-                       start=cut_start, frames=cut_frames,
-                       duration=2.0, effect="Tĩnh")
+                       source=source, source_start=source_start,
+                       start=t, frames=cut_frames, duration=2.0,
+                       effect="Tĩnh", interview_cutaway=True)
             last = copy.deepcopy(clip)
-            last["start"] = cut_start + 2.0
+            last["start"] = t + 2.0
             last["frames"] = after
             last["duration"] = after / fps
             if last["type"] == "video":
                 last["source_start"] = float(clip["source_start"]) + (before + cut_frames) / fps
             clips = clips[:index] + [first, cut, last] + clips[index + 1:]
-            placed.append(cut_start)
-            last_cutaway_end = cut_start + 2.0
-            next_source += 3.5
-            total_count += 1
+            global_cutaways.append(t)
+            inserted += 1
+            count += 1
         p["clips"] = clips
-        if placed:
-            log(f"Number {p.get('number', '?')}: {len(placed)} interview cutaway, mỗi cảnh 2 giây.")
-
-    log(f"SMART INTERVIEW CUTAWAY: Tổng {total_count} cảnh, cách nhau ít nhất {minimum_gap:.0f} giây, Voice AI không đổi.")
+        log(f"Number {p.get('number', '?')}: {inserted} interview cutaway.")
+    log(f"SMART INTERVIEW: {count} cảnh 2 giây, khoảng cách >= {gap:.0f}s, không trùng nguồn hoặc Opening.")
     return parts
