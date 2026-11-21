@@ -347,7 +347,8 @@ class KhiemYoutube:
         )
         header.pack(fill="x")
 
-        self.studio_button(header, "CẬP NHẬT GITHUB", self.open_safe_updater, primary=True).pack(side="right", anchor="n", padx=(12, 0))
+        self.studio_button(header, "CẬP NHẬT GITHUB", self.open_safe_updater, primary=True).pack(side="right", anchor="n", padx=(8, 0))
+        self.studio_button(header, "DỌN FILE RÁC", self.creator_cleanup_dialog).pack(side="right", anchor="n", padx=(8, 0))
 
         tk.Label(header, text="▣  KHIÊM YOUTUBE", bg=COLORS["bg"],
                  fg=COLORS["text"], font=("Segoe UI", 22, "bold")).pack(side="left")
@@ -456,11 +457,6 @@ class KhiemYoutube:
         self.creator_project_suggestions.bind("<Return>", lambda _e: self.creator_pick_suggestion("project"))
         self.creator_channel_search.trace_add("write", lambda *_: self.creator_filter_channels())
         self.creator_project_search.trace_add("write", lambda *_: self.creator_filter_projects())
-        cleanup_bar = ttk.Frame(self.creator_tab)
-        cleanup_bar.pack(fill="x", pady=(12, 0))
-        ttk.Label(cleanup_bar, text="Dọn cache Python và nhật ký cũ của ứng dụng. Không đụng tới dự án.",
-                  foreground=COLORS["muted"]).pack(side="left")
-        self.studio_button(cleanup_bar, "QUÉT & DỌN FILE RÁC", self.creator_cleanup_dialog).pack(side="right")
         self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(),
                                                              self.creator_sync_edit(), self.creator_update_channel_path()))
         self.creator_name.trace_add("write", lambda *_: self.creator_update_preview())
