@@ -95,7 +95,8 @@ def export(c,parts,log):
  if subtitle_path.is_file():
   try:
    import re
-   ref=read(Path(__file__).resolve().parent/'capcut_v11_reference.json')
+   from capcut_v11_reference import REFERENCE
+   ref=REFERENCE
    text_track=copy.deepcopy(ref['text_track']); text_track.update(id=uid(),segments=[])
    def stamp(value):
     h,m,tail=value.replace('.',',').split(':')
@@ -136,7 +137,8 @@ def export(c,parts,log):
  # Safe native fade transition. No overlap or time shifts, never on interview.
  if str(c.get('transition','')).lower() not in ('không','none','off','cut','tắt'):
   try:
-   ref=read(Path(__file__).resolve().parent/'capcut_v11_reference.json')
+   from capcut_v11_reference import REFERENCE
+   ref=REFERENCE
    fade=next(t for t in ref['transitions'] if t['name']=='Mờ đen')
    video_segments=tracks['video']['segments']
    video_segments.sort(key=lambda x:x['target_timerange']['start'])
