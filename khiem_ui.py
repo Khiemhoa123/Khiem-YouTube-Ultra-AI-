@@ -1218,7 +1218,8 @@ class KhiemYoutube:
                     from smart_vietsub_v11 import create as create_vietsub
                     vietsub_path = create_vietsub(config, parts, logger)
                 except Exception as vietsub_error:
-                    logger("CẢNH BÁO VIETSUB: " + str(vietsub_error))
+                    logger("LỖI VIETSUB: " + str(vietsub_error))
+                    raise RuntimeError("Dừng xuất CapCut vì Vietsub chưa được tạo. " + str(vietsub_error)) from vietsub_error
 
             if mode == "capcut":
                 from capcut import export
