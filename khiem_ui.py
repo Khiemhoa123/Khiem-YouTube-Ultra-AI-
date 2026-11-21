@@ -1211,6 +1211,15 @@ class KhiemYoutube:
             )
             self.set_progress(30)
 
+            # Vietnamese subtitles are review-only and never burned into MP4.
+            vietsub_path = None
+            if mode == "capcut":
+                try:
+                    from smart_vietsub_v11 import create as create_vietsub
+                    vietsub_path = create_vietsub(config, parts, logger)
+                except Exception as vietsub_error:
+                    logger("CẢNH BÁO VIETSUB: " + str(vietsub_error))
+
             if mode == "capcut":
                 from capcut import export
 
@@ -1219,6 +1228,12 @@ class KhiemYoutube:
                     parts,
                     logger
                 )
+                if vietsub_path:
+                    try:
+                        from smart_vietsub_v11 import attach_to_capcut
+                        attach_to_capcut(project_path, vietsub_path, logger)
+                    except Exception as subtitle_error:
+                        logger("CẢNH BÁO: Không chép được Vietsub: " + str(subtitle_error))
                 if config.get("_interview_intro"):
                     logger("Đã thêm interview đầu timeline CapCut: " + str(project_path))
 
