@@ -22,7 +22,17 @@ def discover(root, interview=None):
     interview_path = Path(interview).resolve() if interview and Path(interview).is_file() else None
     result = {"voice": {}, "txt": {}, "images": [], "videos": [], "duplicates": []}
     candidates = {"voice": {}, "txt": {}}
-    for p in sorted(base.rglob("*"), key=lambda p: str(p).casefold()):
+    # New structured projects keep Interview and exports outside the media pool.
+    structured = (base / "01 - Voice").is_dir() and (base / "02 - Kich Ban TXT").is_dir()
+    if structured:
+        scan_roots = [
+            base / "01 - Voice", base / "02 - Kich Ban TXT",
+            base / "03 - Hinh Anh", base / "04 - Video"
+        ]
+        source_files = (p for folder in scan_roots if folder.is_dir() for p in folder.rglob("*"))
+    else:
+        source_files = base.rglob("*")
+    for p in sorted(source_files, key=lambda p: str(p).casefold()):
         if not p.is_file() or _excluded(p.relative_to(base)):
             continue
         suffix = p.suffix.lower()
