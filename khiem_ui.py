@@ -391,19 +391,24 @@ class KhiemYoutube:
         self.creator_base = tk.StringVar(value=str(Path.home() / "Documents" / "KHIEM YOUTUBE"))
         self.creator_preview = tk.StringVar(value="")
         self.creator_selected = tk.StringVar(value="")
+        self.creator_channel = tk.StringVar(value="")
         self.heading(self.creator_tab, "TẠO DỰ ÁN MỚI")
         ttk.Label(self.creator_tab, text="Tạo nhiều dự án trước. Chọn dự án trong danh sách và bấm ĐIỀN TAB 01 khi cần dựng.").pack(anchor="w", pady=(0, 16))
         panel = ttk.LabelFrame(self.creator_tab, text="THÔNG TIN DỰ ÁN", padding=18)
         panel.pack(fill="x")
-        ttk.Label(panel, text="Tên dự án").grid(row=0, column=0, sticky="w", pady=8)
-        ttk.Entry(panel, textvariable=self.creator_name).grid(row=0, column=1, sticky="ew", padx=10, pady=8)
-        ttk.Label(panel, text="Thư mục lưu").grid(row=1, column=0, sticky="w", pady=8)
-        ttk.Entry(panel, textvariable=self.creator_base).grid(row=1, column=1, sticky="ew", padx=10, pady=8)
-        self.studio_button(panel, "Chọn thư mục", self.creator_choose).grid(row=1, column=2, pady=8)
+        ttk.Label(panel, text="Kênh YouTube").grid(row=0, column=0, sticky="w", pady=8)
+        self.creator_channel_dropdown = ttk.Combobox(panel, textvariable=self.creator_channel, width=40)
+        self.creator_channel_dropdown.grid(row=0, column=1, sticky="ew", padx=10, pady=8)
+        self.studio_button(panel, "TẠO / CHỌN KÊNH", self.creator_create_channel).grid(row=0, column=2, pady=8)
+        ttk.Label(panel, text="Tên dự án").grid(row=1, column=0, sticky="w", pady=8)
+        ttk.Entry(panel, textvariable=self.creator_name).grid(row=1, column=1, sticky="ew", padx=10, pady=8)
+        ttk.Label(panel, text="Thư mục lưu").grid(row=2, column=0, sticky="w", pady=8)
+        ttk.Entry(panel, textvariable=self.creator_base).grid(row=2, column=1, sticky="ew", padx=10, pady=8)
+        self.studio_button(panel, "Chọn thư mục", self.creator_choose).grid(row=2, column=2, pady=8)
         panel.columnconfigure(1, weight=1)
-        ttk.Label(panel, text="Đường dẫn dự kiến").grid(row=2, column=0, sticky="w", pady=8)
-        ttk.Label(panel, textvariable=self.creator_preview, wraplength=700).grid(row=2, column=1, columnspan=2, sticky="w", padx=10, pady=8)
-        for var in (self.creator_name, self.creator_base):
+        ttk.Label(panel, text="Đường dẫn dự kiến").grid(row=3, column=0, sticky="w", pady=8)
+        ttk.Label(panel, textvariable=self.creator_preview, wraplength=700).grid(row=3, column=1, columnspan=2, sticky="w", padx=10, pady=8)
+        for var in (self.creator_name, self.creator_base, self.creator_channel):
             var.trace_add("write", lambda *_: self.creator_update_preview())
         self.creator_update_preview()
         ttk.Label(self.creator_tab, text="Thư mục được tạo: 01 - Voice | 02 - Kich Ban TXT | 03 - Hinh Anh | 04 - Video | 05 - Interview | 06 - Xuat Video", wraplength=900).pack(anchor="w", pady=16)
@@ -421,12 +426,61 @@ class KhiemYoutube:
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(choose_row, "LÀM MỚI DANH SÁCH", self.creator_refresh).pack(side="left", padx=(0, 8))
         self.studio_button(choose_row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
-        self.creator_base.trace_add("write", lambda *_: self.creator_refresh())
+        self.creator_base.trace_add("write", lambda *_: self.creator_refresh_channels())
+        self.creator_channel.trace_add("write", lambda *_: self.creator_refresh())
+        self.creator_refresh_channels()
+
+
+    def creator_validate_name(self, name, label):
+        if not name or name in (".", "..") or name.endswith((".", " ")) or any(
+                ch in '<>:"/\\\\|?*' or ord(ch) < 32 for ch in name):
+            raise ValueError(label + " không hợp lệ.")
+        if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+            raise ValueError(label + " trùng tên hệ thống Windows.")
+
+    def creator_channel_path(self):
+        base = self.creator_base.get().strip()
+        channel = self.creator_channel.get().strip()
+        if not base:
+            raise ValueError("Chưa chọn thư mục lưu.")
+        self.creator_validate_name(channel, "Tên kênh")
+        return Path(base).expanduser() / channel
+
+    def creator_refresh_channels(self):
+        base = Path(self.creator_base.get().strip()).expanduser()
+        names = []
+        try:
+            if base.is_dir():
+                names = sorted((p.name for p in base.iterdir() if p.is_dir()), key=str.casefold)
+        except OSError:
+            pass
+        self.creator_channel_dropdown.configure(values=names)
+        if self.creator_channel.get() not in names:
+            self.creator_channel.set(names[0] if names else "")
         self.creator_refresh()
 
+    def creator_create_channel(self):
+        if self.busy or self.queue_running:
+            messagebox.showwarning("Đang xử lý", "Hãy đợi tác vụ hoàn thành.")
+            return
+        try:
+            folder = self.creator_channel_path()
+            if folder.exists() and not folder.is_dir():
+                raise ValueError("Đường dẫn kênh đang là một file.")
+            folder.mkdir(parents=True, exist_ok=True)
+            self.creator_refresh_channels()
+            self.creator_channel.set(folder.name)
+            self.log("Đã tạo/chọn kênh: " + str(folder))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Tạo kênh", str(exc))
 
     def creator_refresh(self):
-        base = Path(self.creator_base.get().strip()).expanduser()
+        try:
+            base = self.creator_channel_path()
+        except ValueError:
+            self.creator_dropdown.configure(values=[])
+            self.creator_selected.set("")
+            return
         folders = ("01 - Voice", "02 - Kich Ban TXT", "03 - Hinh Anh",
                    "04 - Video", "05 - Interview", "06 - Xuat Video")
         names = []
@@ -449,8 +503,7 @@ class KhiemYoutube:
         if not name:
             messagebox.showinfo("Chọn dự án", "Chưa có dự án. Hãy tạo dự án trước.")
             return
-        base = Path(self.creator_base.get().strip()).expanduser()
-        target = base / name
+        target = self.creator_channel_path() / name
         folders = {
             "voice": "01 - Voice", "txt": "02 - Kich Ban TXT",
             "images": "03 - Hinh Anh", "videos": "04 - Video",
@@ -482,7 +535,9 @@ class KhiemYoutube:
         base = self.creator_base.get().strip()
         if not base:
             raise ValueError("Chưa chọn thư mục lưu.")
-        return Path(base).expanduser() / name
+        channel = self.creator_channel.get().strip()
+        self.creator_validate_name(channel, "Tên kênh")
+        return Path(base).expanduser() / channel / name
 
     def creator_update_preview(self):
         try:
@@ -510,7 +565,7 @@ class KhiemYoutube:
             target.mkdir(parents=True, exist_ok=True)
             for dirname in folders.values():
                 (target / dirname).mkdir(exist_ok=True)
-            self.creator_refresh()
+            self.creator_refresh_channels()
             self.creator_selected.set(target.name)
             self.log("Đã tạo thư mục dự án: " + str(target))
             messagebox.showinfo("Đã tạo dự án",
