@@ -8,6 +8,7 @@ import os
 import re
 import traceback
 import time
+import shutil
 from project_queue_v11 import ProjectQueue
 from queue_precheck_v11 import inspect as inspect_project
 
@@ -455,6 +456,11 @@ class KhiemYoutube:
         self.creator_project_suggestions.bind("<Return>", lambda _e: self.creator_pick_suggestion("project"))
         self.creator_channel_search.trace_add("write", lambda *_: self.creator_filter_channels())
         self.creator_project_search.trace_add("write", lambda *_: self.creator_filter_projects())
+        cleanup_bar = ttk.Frame(self.creator_tab)
+        cleanup_bar.pack(fill="x", pady=(12, 0))
+        ttk.Label(cleanup_bar, text="Dọn cache Python và nhật ký cũ của ứng dụng. Không đụng tới dự án.",
+                  foreground=COLORS["muted"]).pack(side="left")
+        self.studio_button(cleanup_bar, "QUÉT & DỌN FILE RÁC", self.creator_cleanup_dialog).pack(side="right")
         self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(),
                                                              self.creator_sync_edit(), self.creator_update_channel_path()))
         self.creator_name.trace_add("write", lambda *_: self.creator_update_preview())
@@ -577,6 +583,95 @@ class KhiemYoutube:
 
     def creator_show_edit_channel(self):
         self.creator_channel_dialog(True)
+
+    def creator_cleanup_candidates(self):
+        # Strict allowlist: only Python bytecode caches and aged application logs
+        # inside the application's own directory. Never scan channel/project roots.
+        root = Path(__file__).resolve().parent
+        candidates = []
+        now = time.time()
+        for cache in root.rglob("__pycache__"):
+            try:
+                if not cache.is_dir() or cache.is_symlink():
+                    continue
+                if any(part in (".git", "venv", ".venv", "site-packages") for part in cache.relative_to(root).parts):
+                    continue
+                for item in cache.iterdir():
+                    if item.is_file() and not item.is_symlink() and item.suffix in (".pyc", ".pyo"):
+                        candidates.append(item)
+            except (OSError, ValueError):
+                continue
+        # Only old logs at application root, not nested project or user folders.
+        for pattern in ("*.log",):
+            for item in root.glob(pattern):
+                try:
+                    if item.is_file() and not item.is_symlink() and now - item.stat().st_mtime > 30 * 86400:
+                        candidates.append(item)
+                except OSError:
+                    continue
+        return list(dict.fromkeys(candidates))
+
+    def creator_cleanup_dialog(self):
+        if self.busy or self.queue_running or any(j.get("status") == "running" for j in self.queue.jobs):
+            messagebox.showwarning("Đang xử lý", "Không thể dọn rác khi tác vụ đang chạy.")
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("DỌN DẸP FILE RÁC | KHIÊM YOUTUBE")
+        dialog.geometry("690x440")
+        dialog.minsize(540, 340)
+        dialog.transient(self.root)
+        body = ttk.Frame(dialog, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Chỉ quét cache Python và log ứng dụng cũ hơn 30 ngày.").pack(anchor="w")
+        ttk.Label(body, text="Không xóa ảnh, video, voice, TXT, CapCut, MP4 hoặc thư mục dự án.",
+                  foreground=COLORS["muted"]).pack(anchor="w", pady=(0, 8))
+        status = tk.StringVar(value="Bấm QUÉT để kiểm tra dung lượng.")
+        ttk.Label(body, textvariable=status).pack(anchor="w", pady=(0, 8))
+        listing = tk.Listbox(body, bg=COLORS["input"], fg=COLORS["text"],
+                             selectbackground=COLORS["accent"], relief="flat")
+        listing.pack(fill="both", expand=True, pady=(0, 10))
+        found = []
+        def scan():
+            found.clear()
+            listing.delete(0, "end")
+            found.extend(self.creator_cleanup_candidates())
+            total = 0
+            for path in found:
+                try:
+                    size = path.stat().st_size
+                    total += size
+                    listing.insert("end", "%s   (%.1f KB)" % (path.name, size / 1024))
+                except OSError:
+                    continue
+            status.set("%s file có thể dọn | %.2f MB" % (len(found), total / 1048576))
+        def remove():
+            if self.busy or self.queue_running or any(j.get("status") == "running" for j in self.queue.jobs):
+                messagebox.showwarning("Đang xử lý", "Hãy đợi tác vụ hoàn thành.", parent=dialog)
+                return
+            if not found:
+                messagebox.showinfo("Dọn dẹp", "Không có file nào cần xóa. Hãy quét trước.", parent=dialog)
+                return
+            if not messagebox.askyesno("Xác nhận xóa", "Xóa %s file cache/log đã liệt kê?\\nKhông ảnh hưởng dữ liệu dự án." % len(found), parent=dialog):
+                return
+            allowed = set(self.creator_cleanup_candidates())
+            deleted, failed = 0, 0
+            for path in found:
+                if path not in allowed:
+                    continue
+                try:
+                    path.unlink()
+                    deleted += 1
+                except OSError:
+                    failed += 1
+            scan()
+            self.log("Dọn file rác: %s file đã xóa, %s lỗi." % (deleted, failed))
+            messagebox.showinfo("Kết quả", "Đã xóa %s file. Không xóa được %s file." % (deleted, failed), parent=dialog)
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x")
+        self.studio_button(buttons, "QUÉT FILE RÁC", scan).pack(side="left", padx=(0, 8))
+        self.studio_button(buttons, "XÓA FILE ĐÃ QUÉT", remove, primary=True).pack(side="left")
+        self.studio_button(buttons, "ĐÓNG", dialog.destroy).pack(side="right")
+        scan()
 
     def creator_open_selected(self):
         try:
