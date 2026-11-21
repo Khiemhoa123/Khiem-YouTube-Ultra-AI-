@@ -43,7 +43,7 @@ def indexed(root, suffixes):
             result[n] = p
     return result
 
-def plan(key, voice_root=None, images=20, videos=5):
+def plan(key, voice_root=None, images=20, videos=5, script_root=None, log=lambda msg: None):
     groups = []
     current = None
     for raw in key.read_text(encoding="utf-8-sig").splitlines():
@@ -66,10 +66,33 @@ def plan(key, voice_root=None, images=20, videos=5):
     voice = indexed(voice_root, AUDIO) if voice_root else {}
     if voice_root and set(voice) != {g["number"] for g in groups}:
         raise ValueError("Số thứ tự Voice không khớp các mục KEY.")
+    scripts = indexed(script_root, {".txt"}) if script_root else {}
+    if script_root and set(scripts) != {g["number"] for g in groups}:
+        raise ValueError("Số thứ tự TXT kịch bản không khớp các mục KEY.")
+    contents = {}
+    for n,p in sorted(scripts.items()):
+        contents[n] = p.read_text(encoding="utf-8-sig").strip()
+        if not contents[n]:
+            raise ValueError("TXT kịch bản rỗng: "+p.name)
+        log(f"TXT {n:02d}: {p.name} | {len(contents[n].split())} từ")
     for g in groups:
         n=g["number"]
         g["duration"]=duration(voice[n]) if n in voice else None
         g["queries"]=list(dict.fromkeys(g["queries"]))
+        script = contents.get(n,"")
+        if script:
+            words = set(re.findall(r"\w+",script.casefold()))
+            def relevance(q):
+                tokens = {w for w in re.findall(r"\w+",q.casefold()) if len(w)>3}
+                return len(tokens & words)/max(1,len(tokens))
+            g["queries"].sort(key=relevance,reverse=True)
+            g["script_file"]=str(scripts[n])
+            g["script_words"]=len(script.split())
+            g["context_terms"]=sorted(words)
+            log(f"Phần {n:02d}: đã xếp ưu tiên {len(g['queries'])} KEY theo TXT.")
+            if g["duration"] is None:
+                g["duration"]=len(script.split())*60/145
+                log(f"Phần {n:02d}: thời lượng ước tính từ TXT {g['duration']:.1f}s.")
         g["image_target"]=images
         g["video_target"]=videos
     return groups
@@ -128,9 +151,9 @@ def download(page, folder, kind, known, stop):
     finally:
         temp.unlink(missing_ok=True)
 
-def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count=5):
+def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count=5, script_root=None):
     log('Đang đọc KEY: '+key.name)
-    timeline=plan(key, voice_root, image_count, video_count)
+    timeline=plan(key, voice_root, image_count, video_count, script_root, log)
     log(f'Đã đọc {len(timeline)} phần. Đang kiểm tra tư liệu có sẵn.')
     (root/"_media_plan.json").write_text(json.dumps(timeline,ensure_ascii=False,indent=2),encoding="utf-8")
     known=set()
@@ -168,6 +191,12 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
                 except Exception as e:
                     log("Lỗi tìm kiếm: "+str(e))
                     continue
+                terms=set(part.get("context_terms",[]))
+                if terms:
+                    def page_score(page):
+                        tokens={w for w in re.findall(r"\w+",page.get("title","").casefold()) if len(w)>3}
+                        return len(tokens & terms)/max(1,len(tokens))
+                    pages.sort(key=page_score,reverse=True)
                 log(f"Nhận {len(pages)} kết quả; đã tải {added}/{need}")
                 for page in pages:
                     if stop.is_set() or added>=need: break
@@ -194,6 +223,7 @@ def add_tab(notebook):
     path=tk.StringVar()
     key_path=tk.StringVar()
     voice_path=tk.StringVar()
+    script_path=tk.StringVar()
     image_count=tk.StringVar(value="20")
     video_count=tk.StringVar(value="5")
     mode=tk.StringVar(value="both")
@@ -210,9 +240,10 @@ def add_tab(notebook):
         ttk.Button(row,text="Chọn",command=choose).pack(side="left")
     picker("File KEY TXT",key_path,True)
     picker("Thư mục lưu",path)
+    picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
     counts=ttk.Frame(frame); counts.pack(fill="x")
-    ttk.Label(counts,text="Không có Voice: ảnh/phần").pack(side="left")
+    ttk.Label(counts,text="Không có Voice/TXT: ảnh/phần").pack(side="left")
     ttk.Entry(counts,textvariable=image_count,width=5).pack(side="left")
     ttk.Label(counts,text="Video/phần").pack(side="left")
     ttk.Entry(counts,textvariable=video_count,width=5).pack(side="left")
@@ -230,6 +261,9 @@ def add_tab(notebook):
             root=Path(path.get()).resolve()
             key=Path(key_path.get()).resolve()
             vr=Path(voice_path.get()).resolve() if voice_path.get().strip() else None
+            sr=Path(script_path.get()).resolve() if script_path.get().strip() else None
+            if sr and not sr.is_dir(): raise ValueError("Thư mục TXT không tồn tại.")
+            if vr and not vr.is_dir(): raise ValueError("Thư mục Voice không tồn tại.")
             ni,nv=int(image_count.get()),int(video_count.get())
             if not root.is_dir() or not key.is_file() or not (0<=ni<=120 and 0<=nv<=20):
                 raise ValueError("Kiểm tra đường dẫn và số lượng ảnh 0-120, video 0-20.")
@@ -238,7 +272,7 @@ def add_tab(notebook):
         selected=mode.get()
         stop.clear(); button.configure(state="disabled")
         def worker():
-            try: run(root,selected,stop,events.put,key,vr,ni,nv)
+            try: run(root,selected,stop,events.put,key,vr,ni,nv,sr)
             except Exception as e: events.put("Lỗi: "+str(e))
             finally: events.put(None)
         threading.Thread(target=worker,daemon=True).start()
