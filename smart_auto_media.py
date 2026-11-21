@@ -1,5 +1,6 @@
 """Independent Wikimedia Commons media downloader. No renderer imports."""
 import time
+import os
 from urllib.error import HTTPError
 from urllib.parse import quote_plus
 import webbrowser
@@ -280,6 +281,7 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
 def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log, advance):
     from PIL import Image
     import shutil
+    log("BROWSER MEDIA: Đọc KEY + TXT + Voice; không gọi Commons.")
     parts=plan(key,vr,ni,nv,sr,log)
     if inbox==root or root in inbox.parents or inbox in root.parents:
         raise ValueError("Chọn thư mục Downloads riêng, không nằm trong dự án.")
@@ -299,7 +301,10 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
         if folder.resolve().parent!=root: raise ValueError("Thư mục ngoài dự án.")
         target=ni if part["duration"] is None else min(120,math.ceil(part["duration"]/6*1.15))
         count=sum(p.is_file() and p.suffix.lower() in IMG for p in folder.rglob("*"))
-        for q in part["queries"]:
+        log(f"Phần {n:02d}: cần {target} ảnh, hiện có {count}.")
+        person=part["title"].split("|")[-1].strip() if "|" in part["title"] else ""
+        queries=list(dict.fromkeys(([person] if person else [])+part["queries"]))
+        for q in queries:
             if stop.is_set() or count>=target: break
             before={p.name for p in inbox.iterdir()}
             url=("https://www.gettyimages.com/photos/"+quote_plus(q).replace("+","-") if source=="Getty" else "https://www.google.com/search?tbm=isch&q="+quote_plus(q))
@@ -308,9 +313,15 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
             log(f"Phần {n:02d} | {part['title']} | {count}/{target} ảnh")
             log("Cốc Cốc: "+q)
             log("Dùng Imageye tải ảnh có quyền sử dụng vào thư mục nhận. Đợi tải xong rồi bấm NHẬN ẢNH / TIẾP.")
+            waiting=time.monotonic()
             while not advance.wait(0.5):
                 if stop.is_set(): return
+                if time.monotonic()-waiting>=15:
+                    log(f"Đang chờ bạn tải ảnh Imageye cho phần {n:02d}, rồi bấm NHẬN ẢNH / TIẾP.")
+                    waiting=time.monotonic()
             if stop.is_set(): return
+            log("Đang kiểm tra ảnh mới trong: "+str(inbox))
+            previous_count=count
             for p in sorted(inbox.iterdir()):
                 if stop.is_set() or count>=target: break
                 if p.name in before or not p.is_file() or p.suffix.lower() not in IMG: continue
@@ -329,9 +340,19 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
                         f.write(json.dumps({"file":dest.name,"search":url,"original_filename":p.name,"rights":"user review required"},ensure_ascii=False)+"\n")
                     log(f"Đã nhận {count}/{target}: {p.name}")
                 except (OSError,ValueError) as e: log("Bỏ qua: "+str(e))
+            log(f"Đợt này nhận {count-previous_count} ảnh; tổng {count}/{target}.")
         log(f"Phần {n:02d}: {count}/{target} ảnh. Kiểm tra nhân vật và giấy phép.")
     log("Kết thúc nhận ảnh. Ảnh gốc vẫn nằm trong thư mục tải.")
 
+
+def find_coccoc():
+    for env in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"):
+        base=os.environ.get(env)
+        if base:
+            for rel in ("CocCoc/Browser/Application/browser.exe","Coc Coc/Browser/Application/browser.exe"):
+                p=Path(base)/rel
+                if p.is_file(): return str(p)
+    return ""
 
 def add_tab(notebook):
     frame=ttk.Frame(notebook,padding=12)
@@ -342,15 +363,15 @@ def add_tab(notebook):
     script_path=tk.StringVar()
     image_count=tk.StringVar(value="20")
     video_count=tk.StringVar(value="5")
-    mode=tk.StringVar(value="both")
-    browser_mode=tk.BooleanVar(value=False)
-    browser_path=tk.StringVar()
+    mode=tk.StringVar(value="image")
+    browser_mode=tk.BooleanVar(value=True)
+    browser_path=tk.StringVar(value=find_coccoc())
     inbox_path=tk.StringVar(value=str(Path.home()/"Downloads"))
     source=tk.StringVar(value="Google")
     advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
-    ttk.Label(frame,text="Tải tư liệu Wikimedia Commons từ KEY TXT độc lập").pack(anchor="w")
+    ttk.Label(frame,text="SMART BROWSER MEDIA V3.1 | Cốc Cốc + Imageye mặc định").pack(anchor="w")
     def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
@@ -363,7 +384,7 @@ def add_tab(notebook):
     picker("Thư mục lưu",path)
     picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
-    ttk.Checkbutton(frame,text="Cốc Cốc + Imageye (nhận ảnh thủ công)",variable=browser_mode).pack(anchor="w")
+    ttk.Checkbutton(frame,text="Cốc Cốc + Imageye (bỏ chọn để dùng Commons)",variable=browser_mode).pack(anchor="w")
     picker("Cốc Cốc (browser.exe)",browser_path,True,[("EXE","*.exe")])
     picker("Thư mục nhận ảnh tải xuống",inbox_path)
     ttk.Combobox(frame,textvariable=source,values=["Google","Getty"],state="readonly").pack(anchor="w")
@@ -375,7 +396,7 @@ def add_tab(notebook):
     row=ttk.Frame(frame); row.pack(fill="x")
     for label,value in [("Ảnh","image"),("Video","video"),("Ảnh + Video","both")]:
         ttk.Radiobutton(row,text=label,variable=mode,value=value).pack(side="left")
-    ttk.Label(frame,text="Chỉ cần KEY và nơi lưu. Nguồn Commons; cần kiểm tra nội dung và giấy phép.").pack(anchor="w",pady=5)
+    ttk.Label(frame,text="Imageye: tự mở tìm kiếm, bạn tải ảnh có quyền sử dụng rồi bấm NHẬN ẢNH / TIẾP.").pack(anchor="w",pady=5)
     buttons=ttk.Frame(frame); buttons.pack(fill="x")
     output=tk.Text(frame,height=14,wrap="word"); output.pack(fill="both",expand=True,pady=8)
     def start():
@@ -401,6 +422,7 @@ def add_tab(notebook):
         inbox=Path(inbox_path.get()).resolve()
         if use_browser and (not exe.is_file() or not inbox.is_dir() or selected!="image"):
             events.put("Chọn browser.exe Cốc Cốc, thư mục nhận và chế độ Ảnh."); return
+        events.put("Chế độ: "+("Cốc Cốc + Imageye | "+src if use_browser else "Wikimedia Commons"))
         stop.clear(); button.configure(state="disabled")
         def worker():
             try:
