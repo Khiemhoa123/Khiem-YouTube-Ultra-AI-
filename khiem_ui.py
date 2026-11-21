@@ -418,7 +418,7 @@ class KhiemYoutube:
 
     def creator_target(self):
         name = self.creator_name.get().strip()
-        if not name or name in (".", "..") or name.endswith((".", " ")) or re.search(r'[<>:"/\\|?*\\x00-\\x1f]', name):
+        if not name or name in (".", "..") or name.endswith((".", " ")) or any(ch in '<>:"/\\\\|?*' or ord(ch) < 32 for ch in name):
             raise ValueError("Tên dự án không hợp lệ. Không dùng ký tự đặc biệt hoặc dấu chấm cuối.")
         if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
             raise ValueError("Tên dự án trùng tên hệ thống Windows.")
