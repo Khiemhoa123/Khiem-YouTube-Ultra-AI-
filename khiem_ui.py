@@ -391,6 +391,8 @@ class KhiemYoutube:
         self.creator_channels = self.creator_load_channels()
         self.creator_channel = tk.StringVar(value="")
         self.creator_new_channel = tk.StringVar(value="")
+        self.creator_edit_name = tk.StringVar(value="")
+        self.creator_edit_base = tk.StringVar(value="")
         self.creator_base = tk.StringVar(value=str(Path.home() / "Documents" / "KHIEM YOUTUBE"))
         self.creator_name = tk.StringVar(value="")
         self.creator_selected = tk.StringVar(value="")
@@ -403,6 +405,15 @@ class KhiemYoutube:
         self.creator_channel_dropdown = ttk.Combobox(channel_panel, textvariable=self.creator_channel, state="readonly")
         self.creator_channel_dropdown.grid(row=0, column=1, sticky="ew", padx=8, pady=5)
         channel_panel.columnconfigure(1, weight=1)
+        edit_panel = ttk.LabelFrame(self.creator_tab, text="SỬA KÊNH ĐÃ CHỌN", padding=10)
+        edit_panel.pack(fill="x", pady=(0, 8))
+        edit_panel.columnconfigure(1, weight=1)
+        ttk.Label(edit_panel, text="Tên kênh mới").grid(row=0, column=0, sticky="w", pady=3)
+        ttk.Entry(edit_panel, textvariable=self.creator_edit_name).grid(row=0, column=1, sticky="ew", padx=8, pady=3)
+        ttk.Label(edit_panel, text="Thư mục cha").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(edit_panel, textvariable=self.creator_edit_base).grid(row=1, column=1, sticky="ew", padx=8, pady=3)
+        self.studio_button(edit_panel, "CHỌN...", self.creator_choose_edit).grid(row=1, column=2, pady=3)
+        self.studio_button(edit_panel, "LƯU THAY ĐỔI KÊNH", self.creator_edit_channel).grid(row=2, column=1, sticky="w", padx=8, pady=5)
         new_panel = ttk.LabelFrame(self.creator_tab, text="THÊM KÊNH MỚI (CHỈ LÀM MỘT LẦN)", padding=12)
         new_panel.pack(fill="x", pady=(0, 10))
         new_panel.columnconfigure(1, weight=1)
@@ -431,9 +442,108 @@ class KhiemYoutube:
         self.creator_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "LÀM MỚI", self.creator_refresh).pack(side="left", padx=(0, 8))
         self.studio_button(row, "ĐIỀN VÀO TAB 01", self.creator_apply, primary=True).pack(side="left")
-        self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview()))
+        self.creator_channel.trace_add("write", lambda *_: (self.creator_refresh(), self.creator_update_preview(), self.creator_sync_edit()))
         self.creator_name.trace_add("write", lambda *_: self.creator_update_preview())
         self.creator_refresh_channels()
+        self.creator_sync_edit()
+
+    def creator_sync_edit(self):
+        try:
+            folder = self.creator_channel_path()
+            self.creator_edit_name.set(self.creator_channel.get())
+            self.creator_edit_base.set(str(folder.parent))
+        except ValueError:
+            self.creator_edit_name.set("")
+            self.creator_edit_base.set("")
+
+    def creator_choose_edit(self):
+        folder = filedialog.askdirectory(title="Chọn nơi chuyển kênh đến")
+        if folder:
+            self.creator_edit_base.set(folder)
+
+    def creator_edit_channel(self):
+        if self.busy or self.queue_running or any(j.get("status") == "running" for j in self.queue.jobs):
+            messagebox.showwarning("Đang xử lý", "Dừng xử lý và hàng đợi trước khi sửa kênh.")
+            return
+        try:
+            old_name = self.creator_channel.get().strip()
+            old = self.creator_channel_path().resolve()
+            new_name = self.creator_edit_name.get().strip()
+            self.creator_validate_name(new_name, "Tên kênh mới")
+            parent = self.creator_edit_base.get().strip()
+            if not parent:
+                raise ValueError("Chưa chọn thư mục cha.")
+            new = (Path(parent).expanduser() / new_name).resolve()
+            if not old.is_dir():
+                raise ValueError("Thư mục kênh cũ không tồn tại.")
+            if new_name != old_name and new_name in self.creator_channels:
+                raise ValueError("Tên kênh này đã được lưu.")
+            if old == new:
+                messagebox.showinfo("Sửa kênh", "Tên và thư mục chưa thay đổi.")
+                return
+            if new.exists():
+                raise ValueError("Thư mục đích đã tồn tại. Không ghi đè dữ liệu.")
+            if old in new.parents or new in old.parents:
+                raise ValueError("Không thể chuyển kênh vào chính nó hoặc thư mục con.")
+            # Avoid a partially copied channel across drives. Same-drive rename is atomic.
+            if old.drive.lower() != new.drive.lower():
+                raise ValueError("Để an toàn dữ liệu, chỉ hỗ trợ đổi vị trí trong cùng ổ đĩa.")
+            affected = []
+            old_prefix = str(old).lower() + os.sep
+            for job in self.queue.jobs:
+                for field in ("project_folder", "voice", "txt", "images", "videos",
+                              "interview_folder", "out", "draft_root", "sample"):
+                    value = str(job.get("config", {}).get(field, ""))
+                    if value.lower() == str(old).lower() or value.lower().startswith(old_prefix):
+                        affected.append(job)
+                        break
+            if not messagebox.askyesno("Xác nhận sửa kênh",
+                "Đổi tên/chuyển cả thư mục kênh và các dự án?\\n"
+                "Từ: %s\\nĐến: %s\\n"
+                "Sẽ cập nhật đường dẫn Tab 01 và %d mục trong hàng đợi." % (old, new, len(affected))):
+                return
+            new.parent.mkdir(parents=True, exist_ok=True)
+            old.rename(new)
+            previous_channels = dict(self.creator_channels)
+            self.creator_channels.pop(old_name)
+            self.creator_channels[new_name] = str(new)
+            def replace_path(value):
+                if not isinstance(value, str) or not value:
+                    return value
+                try:
+                    relative = Path(value).relative_to(old)
+                    return str(new / relative)
+                except ValueError:
+                    return value
+            try:
+                self.creator_save_channels()
+            except OSError:
+                self.creator_channels = previous_channels
+                new.rename(old)
+                raise
+            for key in ("project_folder", "voice", "txt", "images", "videos",
+                        "interview_folder", "out", "draft_root", "sample"):
+                if key in self.vars:
+                    self.vars[key].set(replace_path(self.vars[key].get()))
+            for job in self.queue.jobs:
+                config = job.get("config", {})
+                for key in ("project_folder", "voice", "txt", "images", "videos",
+                            "interview_folder", "out", "draft_root", "sample"):
+                    if key in config:
+                        config[key] = replace_path(config[key])
+                if job.get("status") in ("ready", "warning", "error"):
+                    job["status"] = "pending"
+                    job["precheck"] = None
+            self.queue.save()
+            self.save_settings()
+            self.creator_refresh_channels()
+            self.creator_channel.set(new_name)
+            self.creator_sync_edit()
+            self.queue_refresh()
+            self.log("Đã sửa kênh và chuyển thư mục: " + str(new))
+            messagebox.showinfo("Đã sửa kênh", "Đã cập nhật tên kênh, thư mục và đường dẫn dự án.")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Không thể sửa kênh", str(exc))
 
     def creator_load_channels(self):
         try:
