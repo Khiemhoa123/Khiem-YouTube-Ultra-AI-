@@ -461,10 +461,10 @@ def imageye_auto(root,key,vr,sr,ni,inbox,browser,person,hotkey,points,stop,log):
             if stop.wait(8): return
             gui.hotkey(*hotkey)
             if stop.wait(6): return
-            for x,y in points:
-                if stop.is_set(): return
+            for x,y,delay in points:
+                if stop.wait(delay): return
                 gui.click(x,y)
-                if stop.wait(2): return
+                if stop.wait(0.3): return
             deadline=time.monotonic()+90
             stable={}
             last_new=time.monotonic()
@@ -520,11 +520,20 @@ def add_tab(notebook):
     source=tk.StringVar(value="Imageye tự động")
     person=tk.StringVar()
     hotkey=tk.StringVar(value="ctrl+shift+y")
-    coords=tk.StringVar()
+    macro_path=Path(os.environ.get("LOCALAPPDATA") or Path.home())/"KhiemYoutube"/"imageye_macro.json"
+    macro_status=tk.StringVar(value="Chưa lưu thao tác")
+    recorder=[None]
+    recording=[]
+    started=[0.0]
+    try:
+        saved=json.loads(macro_path.read_text(encoding="utf-8"))
+        hotkey.set(saved["hotkey"])
+        macro_status.set("Đã lưu thao tác Imageye")
+    except (OSError,ValueError,KeyError,TypeError): pass
     advance=threading.Event()
     events=queue.Queue()
     stop=threading.Event()
-    ttk.Label(frame,text="SMART AUTO MEDIA V4.2 | IMAGEYE JPG - thử nghiệm").pack(anchor="w")
+    ttk.Label(frame,text="SMART AUTO MEDIA V4.3 | IMAGEYE SMART MACRO - thử nghiệm").pack(anchor="w")
     def picker(label,var,is_file=False, types=None):
         ttk.Label(frame,text=label).pack(anchor="w")
         row=ttk.Frame(frame); row.pack(fill="x",pady=3)
@@ -537,10 +546,48 @@ def add_tab(notebook):
     picker("Thư mục lưu",path)
     picker("Thư mục TXT kịch bản (không bắt buộc)",script_path)
     picker("Thư mục Voice (không bắt buộc)",voice_path)
-    for label,var in [("Tên nhân vật chính",person),("Phím tắt Imageye đã cài trong trình duyệt",hotkey),("Tọa độ nút chọn và tải: x,y;x,y",coords)]:
+    for label,var in [("Tên nhân vật chính",person),("Phím tắt Imageye đã cài trong trình duyệt",hotkey)]:
         row=ttk.Frame(frame); row.pack(fill="x")
         ttk.Label(row,text=label).pack(side="left")
         ttk.Entry(row,textvariable=var).pack(side="left",fill="x",expand=True)
+    def record_macro():
+        if recorder[0] is not None or str(button.cget("state"))=="disabled": return
+        try:
+            from pynput import mouse
+        except ImportError:
+            events.put("Cài thư viện: pip install pynput pyautogui Pillow"); return
+        recording.clear()
+        macro_status.set("Đang chuẩn bị ghi sau 5 giây. Mở sẵn Imageye.")
+        button.configure(state="disabled")
+        def begin():
+            started[0]=time.monotonic()
+            def click(x,y,btn,pressed):
+                if pressed and btn==mouse.Button.left and len(recording)<40:
+                    now=time.monotonic()
+                    recording.append([int(x),int(y),min(30,max(0,now-started[0]))])
+                    started[0]=now
+            recorder[0]=mouse.Listener(on_click=click)
+            recorder[0].start()
+            macro_status.set("Đang ghi chuột trong 30 giây. Chọn JPG, chọn ảnh, Download. Tự dừng.")
+            frame.after(30000,finish_macro)
+        frame.after(5000,begin)
+    def finish_macro():
+        listener=recorder[0]
+        if listener is None: return
+        listener.stop(); recorder[0]=None
+        button.configure(state="normal")
+        if not recording:
+            macro_status.set("Không ghi được thao tác. Bản lưu cũ giữ nguyên."); return
+        try:
+            macro_path.parent.mkdir(parents=True,exist_ok=True)
+            tmp=macro_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"hotkey":hotkey.get(),"points":recording},ensure_ascii=False),encoding="utf-8")
+            tmp.replace(macro_path)
+            macro_status.set("Đã lưu "+str(len(recording))+" thao tác. Dùng chung mọi dự án.")
+        except OSError as e: events.put("Lỗi lưu macro: "+str(e))
+    macro_row=ttk.Frame(frame); macro_row.pack(fill="x")
+    ttk.Button(macro_row,text="RECORD 30 GIÂY + TỰ LƯU",command=record_macro).pack(side="left")
+    ttk.Label(macro_row,textvariable=macro_status).pack(side="left")
     picker("Cốc Cốc (browser.exe)",browser_path,True,[("EXE","*.exe")])
     picker("Thư mục nhận ảnh tải xuống",inbox_path)
     ttk.Combobox(frame,textvariable=source,values=["Imageye tự động","Google","Getty"],state="readonly").pack(anchor="w")
@@ -552,7 +599,7 @@ def add_tab(notebook):
     row=ttk.Frame(frame); row.pack(fill="x")
     for label,value in [("Ảnh","image"),("Video","video"),("Ảnh + Video","both")]:
         ttk.Radiobutton(row,text=label,variable=mode,value=value).pack(side="left")
-    ttk.Label(frame,text="Imageye thử nghiệm: cài pyautogui, Pillow, đặt phím tắt và tọa độ. Rê chuột góc trên trái để dừng khẩn cấp.").pack(anchor="w",pady=5)
+    ttk.Label(frame,text="Cài pynput, pyautogui, Pillow. Mở sẵn Imageye, ghi các nút trong 30 giây. Không chuyển cửa sổ khi ghi/chạy.").pack(anchor="w",pady=5)
     buttons=ttk.Frame(frame); buttons.pack(fill="x")
     output=tk.Text(frame,height=14,wrap="word"); output.pack(fill="both",expand=True,pady=8)
     def start():
@@ -586,10 +633,12 @@ def add_tab(notebook):
         if src=="Imageye tự động":
             try:
                 if not main_person: raise ValueError("Nhập tên nhân vật chính.")
-                points=[tuple(map(int,p.split(","))) for p in coords.get().split(";")]
-                if not points or any(len(p)!=2 or min(p)<0 for p in points): raise ValueError("Tọa độ không hợp lệ.")
-            except ValueError as e:
-                events.put("Kiểm tra tên và tọa độ x,y;x,y: "+str(e)); return
+                saved=json.loads(macro_path.read_text(encoding="utf-8"))
+                points=saved["points"]
+                keys=saved["hotkey"].lower().split("+")
+                if not points or any(len(p)!=3 or min(p)<0 or p[2]>30 for p in points): raise ValueError("Macro không hợp lệ.")
+            except (OSError,ValueError,KeyError,TypeError) as e:
+                events.put("Cần RECORD và lưu thao tác Imageye lần đầu: "+str(e)); return
         events.put("Chế độ: "+(("Openverse tự động" if src=="Openverse tự động" else "Cốc Cốc + Imageye | "+src) if use_browser else "Wikimedia Commons"))
         stop.clear(); button.configure(state="disabled")
         def worker():
