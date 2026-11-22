@@ -2215,7 +2215,15 @@ class KhiemYoutube:
 
             if mode in ("render", "capcut") and config.get("_interview_intro"):
                 from smart_interview_intro import insert_interview_cutaways
-                logger("FOLDER LOCK: Bỏ cutaway interview từ nguồn chung để không lấy chéo thư mục.")
+                logger("INTERVIEW: Chèn cutaway 2 giây đầu mỗi Number và 2-3 đoạn bên trong.")
+                try:
+                    parts = insert_interview_cutaways(parts, config["_interview_intro"], config, logger)
+                    total_after = sum(float(z["duration"]) for p in parts for z in p["clips"])
+                    video_after = sum(float(z["duration"]) for p in parts for z in p["clips"] if z["type"] == "video")
+                    logger(f"INTERVIEW: Tỷ lệ video sau chèn {100 * video_after / max(total_after, .001):.1f}%; mục tiêu cài đặt {config.get('target_video_percent', 60)}%.")
+                except Exception as cutaway_error:
+                    logger("CẢNH BÁO INTERVIEW CUTAWAY: " + str(cutaway_error))
+                    logger("Tiếp tục xuất video với timeline gốc.")
 
             timeline = (
                 Path(config["out"])
