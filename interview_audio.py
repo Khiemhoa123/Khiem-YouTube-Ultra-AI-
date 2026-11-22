@@ -30,7 +30,7 @@ def _segments(diarization):
                   for segment, _, speaker in annotation.itertracks(yield_label=True))
 
 
-def export_speakers(video, output, token, target_seconds=35, speakers=3, log=print):
+def export_speakers(video, output, token, target_seconds=35, speakers=None, log=print):
     """Export 30-40s of chronological, non-overlapping speech per speaker.
 
     Returns a mapping of speaker label to output path. Speakers with less than
@@ -43,7 +43,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=3, log=pri
     if not token or not token.strip():
         raise ValueError("Cần Hugging Face token có quyền truy cập model pyannote.")
     target_seconds = max(30, min(40, int(target_seconds)))
-    speakers = max(2, min(3, int(speakers)))
+    # Automatically infer the number of speakers from the recording.
     from pyannote.audio import Pipeline
     log("Đang tải mô hình phân biệt người nói (lần đầu có thể mất thời gian).")
     pipeline = Pipeline.from_pretrained(MODEL_ID, use_auth_token=token.strip())
@@ -56,9 +56,9 @@ def export_speakers(video, output, token, target_seconds=35, speakers=3, log=pri
               "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
         log("AI đang xác định thời gian nói của từng người.")
         try:
-            diarization = pipeline(str(wav), num_speakers=speakers)
+            diarization = pipeline(str(wav))
         except TypeError:
-            diarization = pipeline(str(wav), min_speakers=2, max_speakers=speakers)
+            diarization = pipeline({"audio": str(wav)})
         rows = _segments(diarization)
         if not rows:
             raise ValueError("Không phát hiện được người nói.")
@@ -79,7 +79,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=3, log=pri
         for a, b, speaker in sorted(clean):
             groups.setdefault(speaker, []).append((a, b))
         # Stable speaker numbering based on first appearance.
-        ordered = sorted(groups, key=lambda sp: groups[sp][0][0])[:speakers]
+        ordered = sorted(groups, key=lambda sp: groups[sp][0][0])
         output.mkdir(parents=True, exist_ok=True)
         results = {}
         for index, speaker in enumerate(ordered, 1):
