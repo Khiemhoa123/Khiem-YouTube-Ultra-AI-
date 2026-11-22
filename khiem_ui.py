@@ -454,7 +454,7 @@ class KhiemYoutube:
         stage = None
         if "Đang tải mô hình" in message or "Đã dùng lại mô hình" in message:
             stage = 0
-        elif "V5: quét đoạn" in message:
+        elif "quét đoạn" in message:
             stage = 1
         elif "AI xong đoạn" in message:
             stage = 2
