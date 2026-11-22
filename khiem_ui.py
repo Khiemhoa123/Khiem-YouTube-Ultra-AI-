@@ -438,9 +438,9 @@ class KhiemYoutube:
             self.ia_live_phase.set("LỖI: Không thể hoàn tất phân tích")
             self.ia_live_window.set(message[:190])
             self.ia_status.set("Đã dừng do lỗi, xem Nhật ký.")
-        elif "V8.1: kiểm tra mô hình" in message:
+        elif "kiểm tra mô hình xác minh giọng" in message:
             self.ia_live_phase.set("Đang kiểm tra mô hình WeSpeaker")
-        elif "V8.1: mô hình xác minh giọng sẵn sàng" in message:
+        elif "mô hình xác minh giọng sẵn sàng" in message:
             self.ia_live_phase.set("Mô hình sẵn sàng, chuẩn bị quét")
         # Separate each log event onto its own line, not a continuous string.
         self.ia_log.insert("end", message + "\n")
