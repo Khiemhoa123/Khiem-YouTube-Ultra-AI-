@@ -1986,6 +1986,19 @@ class KhiemYoutube:
             return
         import subprocess
         import sys
+        # Frozen Portable must update its binary, not source Python files.
+        if getattr(sys, "frozen", False):
+            updater_exe = Path(sys.executable).resolve().parent / "KhiemUpdater.exe"
+            if not updater_exe.is_file():
+                messagebox.showerror("Cập nhật", "Thiếu KhiemUpdater.exe. Cần cài bản Portable hỗ trợ tự cập nhật một lần.")
+                return
+            try:
+                subprocess.Popen([str(updater_exe)], cwd=str(updater_exe.parent),
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                self.log("Đã mở trình cập nhật Portable. Đóng Khiêm Youtube trước khi cài.")
+            except OSError as exc:
+                messagebox.showerror("Cập nhật", str(exc))
+            return
         updater = Path(__file__).resolve().parent / "khiem_auto_update.py"
         if not updater.is_file():
             messagebox.showerror("Cập nhật", "Không tìm thấy khiem_auto_update.py trong thư mục phần mềm.")
