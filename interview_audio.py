@@ -84,11 +84,11 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     from pyannote.audio import Model, Inference
     from pyannote.core import Segment
 
-    # V8.1: use the public WeSpeaker model instead of the inaccessible
+    # V8.2: use the published WeSpeaker LM model instead of the inaccessible
     # pyannote/embedding repository. Support both pyannote v3/v4 APIs.
     import inspect
-    log("V8.1: kiểm tra mô hình xác minh giọng WeSpeaker.")
-    embedding_id = "pyannote/wespeaker-voxceleb-resnet34"
+    log("V8.2: kiểm tra mô hình xác minh giọng WeSpeaker-LM.")
+    embedding_id = "pyannote/wespeaker-voxceleb-resnet34-LM"
     try:
         load_args = {}
         signature = inspect.signature(Model.from_pretrained)
@@ -108,9 +108,11 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_model.to(device)
         embedding_infer = Inference(embedding_model, window="whole")
-        log(f"V8.1: mô hình xác minh giọng sẵn sàng trên {device}.")
+        log(f"V8.2: mô hình xác minh giọng sẵn sàng trên {device}.")
     except Exception as exc:
-        detail = str(exc).replace(token.strip(), "[TOKEN]")
+        detail = str(exc)
+        if token.strip():
+            detail = detail.replace(token.strip(), "[TOKEN]")
         raise RuntimeError(
             "Không khởi tạo được WeSpeaker. Kiểm tra Internet, phiên bản "
             "pyannote.audio và quyền tải mô hình "
