@@ -78,7 +78,6 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     # multiple files containing the same speaker.
     import time
     import numpy as np
-    import soundfile as sf
     import torch
     from collections import defaultdict
     from pyannote.audio import Model, Inference
@@ -163,20 +162,44 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                     grouped[who].append((left, right))
         return grouped
 
+    def stable_turn(wav, left, right, reference):
+        """Reject turns containing a second voice or an abrupt speaker change.
+
+        Whole-turn embeddings can average two voices into one plausible vector.
+        Verify overlapping short windows independently, including the edges.
+        This is conservative and may reject legitimate speech.
+        """
+        length = right - left
+        if length < 2.3:
+            return False
+        if length <= 4.2:
+            return True
+        check_length = min(3.2, length * 0.55)
+        checks = [(left, left + check_length),
+                  (right - check_length, right)]
+        if length > 8.0:
+            mid = (left + right - check_length) / 2
+            checks.append((mid, mid + check_length))
+        for a, b in checks:
+            vector = embedding(wav, a, b)
+            if vector is None or float(np.dot(vector, reference)) < SAME:
+                return False
+        return True
+
     # Similarity is a conservative gate, not a guarantee of identity.
     # Ambiguous turns are rejected. Labels from different windows are
     # never assumed to represent the same person.
-    SAME = 0.76
-    MARGIN = 0.07
-    MAX_WINDOWS = 6
+    SAME = 0.80
+    MARGIN = 0.09
+    MAX_WINDOWS = 8
     WINDOW = 90.0
     results = {}
     with tempfile.TemporaryDirectory(prefix="khiem_voice_v8_") as temp_dir:
         temp = Path(temp_dir)
         clusters = []
         window_files = []
-        # Skip typical opening sting; no diarization on the first 25 seconds.
-        start_at = 25.0 if duration > 85.0 else 0.0
+        # Avoid the opening sting and audience applause on long interviews.
+        start_at = 60.0 if duration > 240.0 else (25.0 if duration > 85.0 else 0.0)
         for part in range(MAX_WINDOWS):
             length = min(WINDOW, duration - start_at)
             if length < 30:
@@ -209,7 +232,8 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 # 2-second greeting. Filter turns inconsistent with it.
                 reference = max(candidates, key=lambda t: t[1]-t[0])[2]
                 verified = [(a, b, emb) for a, b, emb in candidates
-                            if float(np.dot(reference, emb)) >= SAME]
+                            if float(np.dot(reference, emb)) >= SAME
+                            and stable_turn(wav, a, b, reference)]
                 if not verified:
                     continue
                 center = np.mean([e for _, _, e in verified], axis=0)
@@ -238,7 +262,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                     # leakage. Never assign one interval to two speakers.
                     all_scores = [float(np.dot(emb, other["center"]))
                                   for other in clusters]
-                    if all_scores[idx] < SAME:
+                    if all_scores[idx] < SAME or not stable_turn(wav, a, b, c["center"]):
                         continue
                     competitors = [v for k, v in enumerate(all_scores) if k != idx]
                     if competitors and all_scores[idx] - max(competitors) < MARGIN:
@@ -263,7 +287,6 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 break
             start_at += length
 
-        output.mkdir(parents=True, exist_ok=True)
         exported = 0
         for c in clusters:
             ordered = sorted(c["cuts"], key=lambda z: (z[0], z[1]))
@@ -302,19 +325,27 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 f"{inputs}concat=n={len(selected)}:v=0:a=1,"
                 "highpass=f=85,lowpass=f=7600,afftdn=nr=8:nf=-50,"
                 "loudnorm=I=-18:TP=-2:LRA=10[out]")
-            exported += 1
-            dest = output / f"Speaker_{exported:02}.mp3"
+            dest = temp / f"Speaker_{exported+1:02}.mp3"
             command.extend(["-filter_complex", ";".join(filters),
                             "-map", "[out]", "-c:a", "libmp3lame",
                             "-b:a", "192k", str(dest)])
             _run(command)
-            results[f"verified_speaker_{exported:02}"] = str(dest)
+            if _duration(dest) < 29.8:
+                log("BỎ QUA: MP3 thực tế dưới 30 giây.")
+                dest.unlink(missing_ok=True)
+                continue
+            output.mkdir(parents=True, exist_ok=True)
+            import shutil
+            final = output / f"Speaker_{exported+1:02}.mp3"
+            shutil.move(str(dest), str(final))
+            exported += 1
+            results[f"verified_speaker_{exported:02}"] = str(final)
             log(f"Đã xuất {dest.name}: {total:.1f}s, "
                 f"{len(selected)} lượt nói đã xác minh.")
     if not results:
         raise ValueError(
             "Không có Speaker đủ 30 giây vượt qua kiểm tra giọng nói V8. "
             "Không xuất MP3 sai. Hãy dùng video dài hơn hoặc nguồn sạch hơn.")
-    log("V8.1 hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
+    log("V9 Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
         "không bảo đảm loại bỏ mọi tiếng cười hoặc giọng chen ngang.")
     return results
