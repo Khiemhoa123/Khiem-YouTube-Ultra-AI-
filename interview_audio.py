@@ -50,8 +50,10 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     if pipeline is None:
         raise RuntimeError("Không tải được model. Kiểm tra token và quyền truy cập.")
     duration = _duration(video)
+    log(f"Video dài {duration:.1f} giây.")
     with tempfile.TemporaryDirectory() as temp:
         wav = Path(temp) / "source.wav"
+        log("Đang chuẩn bị audio 16 kHz từ video.")
         _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
               "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
         log("AI đang xác định thời gian nói của từng người.")
@@ -60,6 +62,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         except TypeError:
             diarization = pipeline({"audio": str(wav)})
         rows = _segments(diarization)
+        log(f"Đã nhận diện {len(set(sp for _, _, sp in rows))} người nói, {len(rows)} lượt nói.")
         if not rows:
             raise ValueError("Không phát hiện được người nói.")
         # Exclude overlap: diarization alone cannot isolate simultaneous voices.
@@ -81,6 +84,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         # Stable speaker numbering based on first appearance.
         ordered = sorted(groups, key=lambda sp: groups[sp][0][0])
         output.mkdir(parents=True, exist_ok=True)
+        log(f"Đang xuất MP3 cho {len(ordered)} người nói được nhận diện.")
         results = {}
         for index, speaker in enumerate(ordered, 1):
             available = sum(b-a for a, b in groups[speaker])
