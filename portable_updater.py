@@ -197,7 +197,7 @@ def apply():
         raise RuntimeError("Manifest khong khop tag GitHub")
     version = manifest["version"]
     current = ROOT / "portable_version.txt"
-    if current.is_file() and current.read_text(encoding="utf-8").strip() == version and not reinstall_var.get():
+    if current.is_file() and current.read_text(encoding="utf-8").strip() == version and not force_reinstall:
         ui_dialog("info", "Khiem Youtube", "Phan mem da la phien ban moi nhat.")
         return
     if not ui_dialog("ask", "Cap nhat Khiem Youtube", f"Cai phien ban {version}?\nHay dong KhiemYoutube.exe truoc khi tiep tuc.\nCan du dung luong trong de tai va giai nen."):
@@ -284,6 +284,7 @@ ttk.Label(frame, textvariable=speed_text).pack(anchor="w", pady=(8, 12))
 detail_text = tk.StringVar(value="Trang thai: cho kiem tra")
 ttk.Label(frame, textvariable=detail_text).pack(anchor="w", pady=(0, 10))
 running = False
+force_reinstall = False
 
 def worker():
     try:
@@ -295,9 +296,10 @@ def worker():
         EVENTS.put(("finished",))
 
 def start():
-    global running
+    global running, force_reinstall
     if running:
         return
+    force_reinstall = reinstall_var.get()
     running = True
     button.configure(state="disabled")
     reinstall_checkbox.configure(state="disabled")
