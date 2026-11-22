@@ -61,7 +61,7 @@ DEFAULTS = {
     "voice": "",
     "interview_folder": "",
     "interview_max_seconds": "30",
-    "interview_enabled": False,
+    "interview_enabled": True,
     "txt": "",
     "images": "",
     "videos": "",
@@ -2284,7 +2284,7 @@ class KhiemYoutube:
 
             if mode in ("render", "capcut") and config.get("_interview_intro"):
                 from smart_interview_intro import insert_interview_cutaways
-                logger("INTERVIEW: Chèn cutaway 2 giây đầu mỗi Number và 2-3 đoạn bên trong.")
+                logger("INTERVIEW: Chèn đúng một cảnh Interview 2 giây vào đầu mỗi Number, giữ nguyên voice.")
                 try:
                     parts = insert_interview_cutaways(parts, config["_interview_intro"], config, logger)
                     total_after = sum(float(z["duration"]) for p in parts for z in p["clips"])
