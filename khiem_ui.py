@@ -1272,7 +1272,6 @@ class KhiemYoutube:
             self.vars["project_folder"].set(str(target))
             for key, dirname in folders.items():
                 self.vars[key].set(str(target / dirname))
-            self.interview_enabled.set(False)
             self.save_settings()
             self.tabs.select(self.project_tab)
             self.log("Đã chọn dự án và điền Tab 01: " + name)
@@ -2277,10 +2276,11 @@ class KhiemYoutube:
                     logger("INTERVIEW: Bắt đầu phân tích video phỏng vấn.")
                     config["_interview_intro"] = choose_intro(config, logger)
                     logger("INTERVIEW: Hoàn tất lựa chọn intro.")
+                    if not config["_interview_intro"]:
+                        raise RuntimeError("Interview bắt buộc: không tìm thấy đoạn có lời nói phù hợp. Hãy bổ sung video vào thư mục Interview.")
                 except Exception as intro_error:
                     logger("CẢNH BÁO SMART INTERVIEW INTRO: " + str(intro_error))
-                    logger("Bỏ qua intro và tiếp tục xuất video bình thường.")
-                    config["_interview_intro"] = None
+                    raise RuntimeError("Interview bắt buộc: không thể phân tích video phỏng vấn. " + str(intro_error)) from intro_error
 
             if mode in ("render", "capcut") and config.get("_interview_intro"):
                 from smart_interview_intro import insert_interview_cutaways
@@ -2292,7 +2292,7 @@ class KhiemYoutube:
                     logger(f"INTERVIEW: Tỷ lệ video sau chèn {100 * video_after / max(total_after, .001):.1f}%; mục tiêu cài đặt {config.get('target_video_percent', 60)}%.")
                 except Exception as cutaway_error:
                     logger("CẢNH BÁO INTERVIEW CUTAWAY: " + str(cutaway_error))
-                    logger("Tiếp tục xuất video với timeline gốc.")
+                    raise RuntimeError("Interview bắt buộc: lỗi chèn cảnh Number. " + str(cutaway_error)) from cutaway_error
 
             timeline = (
                 Path(config["out"])
