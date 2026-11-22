@@ -62,7 +62,7 @@ def choose_intro(c, log):
         log("Bỏ Interview: không có video."); return None
     script = _script_text(c["txt"])
     if not script.strip():
-        log("Bỏ Interview: thiếu TXT mở đầu."); return None
+        log("INTERVIEW: TXT mở đầu trống, tìm câu chuyện hoàn chỉnh không cần khớp kịch bản.")
     model = None
     try:
         from whisper_audio_fix_v11 import get_model, transcribe_media
@@ -71,8 +71,10 @@ def choose_intro(c, log):
         log("WHISPER: Mô hình sẵn sàng.")
     except Exception as exc:
         log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
-    if model is None: return None
-    max_seconds = min(8.0, max(5.0, float(c.get("interview_max_seconds", 8))))
+    if model is None:
+        log("Bỏ Interview: không có Whisper để xác nhận lời nói.")
+        return None
+    max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
     sampled = {}
     candidates = []
     fallback = []
@@ -85,32 +87,35 @@ def choose_intro(c, log):
                 log("Bỏ qua video không có tiếng: " + path.name)
                 continue
             duration = float(info.get("format", {}).get("duration", 0) or 0)
-            if duration > 0.5:
-                fallback.append((str(path), duration))
             if model is None:
                 continue
             log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
             rows = _sample_rows(path, duration, model, log)
             sampled[str(path)] = rows
             log(f"INTERVIEW: {len(rows)} đoạn mẫu.")
-            # Sliding windows over complete Whisper segments. No mid-sentence cut.
+            # One continuous thought: start after a sentence boundary, end at punctuation.
             for i, first in enumerate(rows):
-                for j in range(i, min(len(rows), i + 12)):
+                if i and rows[i-1].text.strip() and not rows[i-1].text.rstrip().endswith((".", "?", "!")):
+                    continue
+                for j in range(i, min(len(rows), i + 30)):
                     last = rows[j]
                     dur = float(last.end - first.start)
                     if dur > max_seconds:
                         break
-                    if dur < 5:
+                    if dur < 5 or dur > max_seconds:
+                        continue
+                    if not last.text.rstrip().endswith((".", "?", "!")):
                         continue
                     phrase = " ".join(s.text.strip() for s in rows[i:j + 1])
+                    if len(_tokens(phrase)) < 12:
+                        continue
                     score = _similarity(script, phrase)
                     # Prefer coherent passages with complete ending punctuation.
                     if phrase.rstrip().endswith((".", "?", "!")):
                         score += 0.03
                     item = (score, str(path), float(first.start), dur, phrase)
                     candidates.append(item)
-                    if len(_tokens(phrase)) >= 8:
-                        fallback.append(item)
+                    fallback.append(item)
         except Exception as exc:
             log("Không phân tích được " + path.name + ": " + str(exc))
     if candidates:
@@ -126,12 +131,12 @@ def choose_intro(c, log):
         def curiosity(item):
             phrase = item[4]
             return (2 if '?' in phrase else 1 if '!' in phrase else 0) + (1 if phrase.rstrip().endswith(('.', '?', '!')) else 0) + min(len(_tokens(phrase)), 24)/24
-        ranked = sorted(fallback, key=curiosity, reverse=True)
+        ranked = sorted(fallback, key=lambda item: (curiosity(item), min(item[3], 24)), reverse=True)
         score, path, start, dur, phrase = random.SystemRandom().choice(ranked[:5])
         c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[path]]
         log(f'INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {dur:.1f}s | co loi noi, chua xac minh khuon mat.')
         return {'source':path, 'source_start':start, 'duration':dur, 'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
-    log('Bo Interview: khong co doan noi chuyen hop le.')
+    log('Bỏ Interview: không tìm được câu chuyện liền mạch, kết thúc trọn câu trong giới hạn thời lượng.')
     return None
 
 def prepend_mp4(c, intro, log):
