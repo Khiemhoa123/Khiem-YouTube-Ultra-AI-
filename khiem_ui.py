@@ -164,6 +164,78 @@ class KhiemYoutube:
             "WM_DELETE_WINDOW", self.close
         )
 
+    def build_interview_audio_tab(self):
+        """Standalone speaker MP3 extraction, separate from video editing."""
+        tab = ttk.Frame(self.tabs, padding=18)
+        self.tabs.add(tab, text="05  INTERVIEW AUDIO")
+        tab.columnconfigure(1, weight=1)
+        self.ia_source = tk.StringVar()
+        self.ia_output = tk.StringVar()
+        self.ia_token = tk.StringVar()
+        self.ia_seconds = tk.IntVar(value=35)
+        self.ia_speakers = tk.IntVar(value=3)
+        ttk.Label(tab, text="TÁCH GIỌNG INTERVIEW THÀNH MP3", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 14))
+        ttk.Label(tab, text="Video phỏng vấn").grid(row=1, column=0, sticky="w")
+        ttk.Entry(tab, textvariable=self.ia_source).grid(row=1, column=1, sticky="ew", padx=8, pady=5)
+        ttk.Button(tab, text="Chọn video", command=self.ia_choose_video).grid(row=1, column=2)
+        ttk.Label(tab, text="Thư mục xuất MP3").grid(row=2, column=0, sticky="w")
+        ttk.Entry(tab, textvariable=self.ia_output).grid(row=2, column=1, sticky="ew", padx=8, pady=5)
+        ttk.Button(tab, text="Chọn thư mục", command=self.ia_choose_output).grid(row=2, column=2)
+        ttk.Label(tab, text="Hugging Face token").grid(row=3, column=0, sticky="w")
+        ttk.Entry(tab, textvariable=self.ia_token, show="*").grid(row=3, column=1, sticky="ew", padx=8, pady=5)
+        ttk.Label(tab, text="Không lưu token vào cài đặt", foreground=COLORS["muted"]).grid(row=3, column=2, sticky="w")
+        ttk.Label(tab, text="Số người nói").grid(row=4, column=0, sticky="w")
+        ttk.Combobox(tab, textvariable=self.ia_speakers, values=(2, 3), state="readonly", width=10).grid(row=4, column=1, sticky="w", padx=8)
+        ttk.Label(tab, text="Thời lượng mỗi MP3 (giây)").grid(row=5, column=0, sticky="w", pady=8)
+        ttk.Spinbox(tab, from_=30, to=40, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
+        self.ia_button = ttk.Button(tab, text="TÁCH SPEAKER VÀ XUẤT MP3", command=self.ia_start)
+        self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=12)
+        self.ia_log = tk.Text(tab, height=14, wrap="word")
+        self.ia_log.grid(row=7, column=0, columnspan=3, sticky="nsew")
+        tab.rowconfigure(7, weight=1)
+        ttk.Label(tab, text="Cần ffmpeg, ffprobe, pyannote.audio và quyền truy cập model pyannote/speaker-diarization-3.1. Đoạn chồng tiếng sẽ bị bỏ qua.", wraplength=850).grid(row=8, column=0, columnspan=3, sticky="w", pady=8)
+
+    def ia_choose_video(self):
+        value = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm"), ("All files", "*.*")])
+        if value:
+            self.ia_source.set(value)
+            if not self.ia_output.get():
+                self.ia_output.set(str(Path(value).parent / "Interview_Audio"))
+
+    def ia_choose_output(self):
+        value = filedialog.askdirectory()
+        if value: self.ia_output.set(value)
+
+    def ia_start(self):
+        source = self.ia_source.get().strip()
+        output = self.ia_output.get().strip()
+        token = self.ia_token.get().strip()
+        if not Path(source).is_file() or not output or not token:
+            messagebox.showerror("Interview Audio", "Chọn video, thư mục xuất và nhập Hugging Face token.")
+            return
+        try:
+            seconds = int(self.ia_seconds.get())
+            speakers = int(self.ia_speakers.get())
+            if not 30 <= seconds <= 40 or speakers not in (2, 3):
+                raise ValueError("Chọn 30 đến 40 giây và 2 hoặc 3 người nói.")
+        except (ValueError, tk.TclError) as exc:
+            messagebox.showerror("Interview Audio", str(exc))
+            return
+        self.ia_button.configure(state="disabled")
+        self.ia_log.delete("1.0", "end")
+        def report(message):
+            self.root.after(0, lambda msg=str(message): (self.ia_log.insert("end", msg + "\\n"), self.ia_log.see("end")))
+        def work():
+            try:
+                from interview_audio import export_speakers
+                result = export_speakers(source, output, token, seconds, speakers, report)
+                report(f"HOÀN THÀNH: {len(result)} file MP3.")
+            except Exception as exc:
+                report("LỖI: " + str(exc))
+            finally:
+                self.root.after(0, lambda: self.ia_button.configure(state="normal"))
+        threading.Thread(target=work, daemon=True).start()
+
     def load_settings(self):
         try:
             return json.loads(
@@ -446,6 +518,8 @@ class KhiemYoutube:
 
 
     def build_creator(self):
+        self.build_interview_audio_tab()
+
         self.creator_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.creator_tab, text="04  TẠO DỰ ÁN")
         self.creator_registry_file = self.settings_file.with_name("khiem_channels.json")
