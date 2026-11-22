@@ -515,10 +515,10 @@ class KhiemYoutube:
         self.build_export()
         self.build_queue()
         self.build_creator()
+        self.build_interview_audio_tab()
 
 
     def build_creator(self):
-        self.build_interview_audio_tab()
 
         self.creator_tab = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.creator_tab, text="04  TẠO DỰ ÁN")
