@@ -289,7 +289,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             log("V8: " + ", ".join(
                 f"Speaker {i+1:02}: {sum(b-a for _,a,b in c['cuts']):.1f}s"
                 for i, c in enumerate(clusters)))
-            ready = [c for c in clusters if sum(b-a for _,a,b in c["cuts"]) >= target_seconds]
+            ready = [c for c in clusters if sum(b-a for _,a,b in c["cuts"]) >= 30.0]
             # Do not assume two speakers. Count is determined by the clip.
             # Scan further when a speaker is still short of the target.
             if len(ready) >= 2 and part >= 3:
@@ -299,8 +299,9 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         exported = 0
         for c in clusters:
             ordered = sorted(c["cuts"], key=lambda z: (z[0], z[1]))
-            if sum(b-a for _, a, b in ordered) < target_seconds:
-                log("BỎ QUA Speaker: dưới 30 giây đã xác minh.")
+            usable = sum(b-a for _, a, b in ordered)
+            if usable < 30.0:
+                log(f"BỎ QUA Speaker: chỉ {usable:.1f}s giọng xác minh, cần tối thiểu 30s.")
                 continue
             selected = []
             remaining = float(target_seconds)
@@ -313,7 +314,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 if remaining < 0.05:
                     break
             total = sum(take for _, _, take in selected)
-            if total < target_seconds - 0.05:
+            if total < 29.95:
                 log(f"BỎ QUA Speaker: chỉ {total:.1f}s hợp lệ.")
                 continue
             # Use individual input files for scanned windows, and trim at
@@ -354,7 +355,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     if not results:
         raise ValueError(
             "Đã quét nhiều vị trí trong video nhưng không thu đủ "
-            f"{target_seconds} giây giọng được xác minh cho một Speaker. "
+            "30 giây giọng được xác minh cho một Speaker. "
             "Đây là thiếu dữ liệu ĐẠT NGƯỠNG AI, không khẳng định video "
             "thiếu lời nói. Hãy xem nhật ký số giây của từng Speaker.")
     log("V9.1 Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
