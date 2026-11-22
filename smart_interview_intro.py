@@ -249,9 +249,8 @@ def insert_interview_cutaways(parts, intro, c, log):
         duration = float(p.get("duration", 0))
         if duration < 2:
             raise RuntimeError(f"Number {number} ngắn hơn 2 giây, không thể chèn Interview.")
-        # Exactly one opening visual, plus two or three evenly spaced cutaways.
-        extra = 3 if duration >= 120 else 2
-        positions = [part_start] + [part_start + round((duration - 2) * i / (extra + 1) * fps) / fps for i in range(1, extra + 1)]
+        # Exactly one silent two-second interview visual at the start of each Number.
+        positions = [part_start]
         placed = 0
         for t in positions:
             available = [x for x in samples if not any(x < b + 1 and x + 2 > a - 1 for a, b in reserved)]
