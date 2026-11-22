@@ -15,6 +15,29 @@ from queue_precheck_v11 import inspect as inspect_project
 
 import app as engine
 
+# Hide the short-lived FFmpeg/FFprobe console windows on Windows.
+# Only intercept these two media tools; leave other subprocesses unchanged.
+import subprocess as _media_subprocess
+_original_media_popen = _media_subprocess.Popen
+def _quiet_media_popen(*args, **kwargs):
+    if os.name == "nt":
+        command = args[0] if args else kwargs.get("args", [])
+        executable = command[0] if isinstance(command, (list, tuple)) and command else command
+        name = Path(str(executable)).name.lower().strip('"')
+        if name in ("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | getattr(_media_subprocess, "CREATE_NO_WINDOW", 0)
+            startup = kwargs.get("startupinfo")
+            if startup is None:
+                startup = _media_subprocess.STARTUPINFO()
+                kwargs["startupinfo"] = startup
+            startup.dwFlags |= getattr(_media_subprocess, "STARTF_USESHOWWINDOW", 1)
+            startup.wShowWindow = 0
+    return _original_media_popen(*args, **kwargs)
+_media_subprocess.Popen = _quiet_media_popen
+
+class _CheckCancelled(Exception):
+    """User requested a safe stop during media inspection."""
+
 try:
     import customtkinter as ctk
     ctk.set_appearance_mode("dark")
@@ -124,6 +147,10 @@ class KhiemYoutube:
         self.interview_enabled = tk.BooleanVar(value=saved.get("interview_enabled", False))
         self.interview_enabled.trace_add("write", lambda *_: self.save_settings())
         self.busy = False
+        self.check_cancel = threading.Event()
+        self.force_recheck = False
+        self.check_stop_button = None
+        self.check_retry_button = None
         self.queue = ProjectQueue(Path(__file__).resolve().parent / "project_queue_v11.json")
         self.queue_running = False
         self.active_job = None
@@ -1481,6 +1508,11 @@ class KhiemYoutube:
             button=self.studio_button(actions,label,lambda m=mode:self.start(m),primary=mode=="capcut")
             button.grid(row=0,column=i,sticky="ew",padx=2,pady=2)
             self.buttons.append(button)
+        self.check_stop_button = self.studio_button(actions, "DỪNG KIỂM TRA", self.stop_check)
+        self.check_stop_button.grid(row=2, column=1, sticky="ew", padx=2, pady=2)
+        self.check_retry_button = self.studio_button(actions, "KIỂM TRA LẠI", self.retry_check)
+        self.check_retry_button.grid(row=2, column=0, sticky="ew", padx=2, pady=2)
+        self.check_stop_button.configure(state="disabled")
         for i,(label,mode) in enumerate((("+ Đợi CapCut","capcut"),("+ Đợi MP4","render"))):
             self.studio_button(actions,label,lambda m=mode:self.queue_add(m)).grid(row=1,column=i,sticky="ew",padx=2,pady=2)
         self.studio_button(actions,"Mở thư mục xuất",self.open_output).grid(row=1,column=2,sticky="ew",padx=2,pady=2)
@@ -2063,6 +2095,22 @@ class KhiemYoutube:
         if not config["effects"]:
             config["effects"] = ["Tĩnh"]
 
+    def stop_check(self):
+        if not self.busy or getattr(self, "current_mode", None) != "check":
+            return
+        self.check_cancel.set()
+        self.run_stage.set("Đang yêu cầu dừng kiểm tra an toàn...")
+        self.log("DỪNG: Đã yêu cầu dừng. Chờ tác vụ AI hiện tại kết thúc để tránh hỏng dữ liệu.")
+        if self.check_stop_button:
+            self.check_stop_button.configure(state="disabled")
+
+    def retry_check(self):
+        if self.busy:
+            messagebox.showinfo("Kiểm tra lại", "Hãy dừng và chờ lần kiểm tra hiện tại kết thúc.")
+            return
+        self.force_recheck = True
+        self.start("check")
+
     def start(self, mode, config_override=None, from_queue=False):
         if self.busy:
             return
@@ -2080,6 +2128,8 @@ class KhiemYoutube:
                 messagebox.showerror("Lỗi", str(error))
             return
 
+        self.current_mode = mode
+        self.check_cancel.clear()
         self.recovery_mode = mode
         self.recovery_project = str(config.get("name", "Dự án"))
         self.recovery_last_stage = "Chuẩn bị dự án"
@@ -2098,6 +2148,10 @@ class KhiemYoutube:
                 state="disabled"
             )
 
+        if self.check_stop_button:
+            self.check_stop_button.configure(state='normal' if mode == 'check' else 'disabled')
+        if self.check_retry_button:
+            self.check_retry_button.configure(state='disabled')
         self.tabs.select(
             self.project_tab
         )
@@ -2119,6 +2173,8 @@ class KhiemYoutube:
         success = False
         failure = ''
         def logger(message):
+            if mode == 'check' and self.check_cancel.is_set():
+                raise _CheckCancelled('Đã dừng kiểm tra theo yêu cầu.')
             self.log(message)
 
             try:
@@ -2166,7 +2222,7 @@ class KhiemYoutube:
             ).encode("utf-8")).hexdigest()
             cache_path = Path(config["out"]) / (config["name"] + ".timeline_cache.json")
             parts = None
-            if cache_path.is_file():
+            if cache_path.is_file() and not (mode == "check" and self.force_recheck):
                 try:
                     cached = json.loads(cache_path.read_text(encoding="utf-8"))
                     if cached.get("fingerprint") == fingerprint:
@@ -2177,9 +2233,13 @@ class KhiemYoutube:
                             logger("TURBO CACHE: Sử dụng timeline đã phân tích, bỏ qua CLIP và Whisper.")
                 except (OSError, ValueError, TypeError):
                     parts = None
+            if mode == "check" and self.force_recheck:
+                logger("KIỂM TRA LẠI: Bỏ qua timeline cache, phân tích lại tư liệu.")
             if parts is None:
                 logger("TIMELINE: Bắt đầu phân tích Voice, TXT và lựa chọn tư liệu.")
                 parts = engine.plan(config, logger)
+                if mode == "check" and self.check_cancel.is_set():
+                    raise _CheckCancelled("Đã dừng kiểm tra theo yêu cầu.")
                 logger("TIMELINE: Hoàn thành lập timeline.")
                 try:
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2288,9 +2348,12 @@ class KhiemYoutube:
                 except Exception:
                     pass
 
+        except _CheckCancelled:
+            failure = "Đã dừng kiểm tra theo yêu cầu."
+            self.log(failure)
         except Exception:
             failure = traceback.format_exc()
-            logger("LỖI:\\n" + failure)
+            self.log("LỖI:\\n" + failure)
 
         finally:
             self.root.after(0, lambda: self.finish(success, failure, from_queue))
@@ -2300,8 +2363,10 @@ class KhiemYoutube:
         if self.run_started_at is not None:
             elapsed = max(0, int(time.monotonic() - self.run_started_at))
             self.run_elapsed.set(f"Tổng thời gian: {elapsed // 3600:02}:{elapsed // 60 % 60:02}:{elapsed % 60:02}")
-        self.run_stage.set("Hoàn thành" if success else "Lỗi, xem nhật ký")
-        self.recovery_write("completed" if success else "failed", failure)
+        stopped = bool(self.check_cancel.is_set() and getattr(self, "current_mode", None) == "check")
+        self.run_stage.set("Đã dừng kiểm tra" if stopped else ("Hoàn thành" if success else "Lỗi, xem nhật ký"))
+        self.recovery_write("stopped" if stopped else ("completed" if success else "failed"), failure)
+        self.force_recheck = False
         self.busy = False
         if from_queue and self.active_job:
             self.queue.update(self.active_job, "success" if success else "failed", failure)
@@ -2313,9 +2378,11 @@ class KhiemYoutube:
                 self.root.after(100, self.queue_next)
 
         for button in self.buttons:
-            button.configure(
-                state="normal"
-            )
+            button.configure(state="normal")
+        if self.check_stop_button:
+            self.check_stop_button.configure(state="disabled")
+        if self.check_retry_button:
+            self.check_retry_button.configure(state="normal")
 
     def close(self):
         if self.busy:
