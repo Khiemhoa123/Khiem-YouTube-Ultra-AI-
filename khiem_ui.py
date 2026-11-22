@@ -190,10 +190,24 @@ class KhiemYoutube:
         ttk.Spinbox(tab, from_=30, to=40, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
         self.ia_button = ttk.Button(tab, text="TÁCH SPEAKER VÀ XUẤT MP3", command=self.ia_start)
         self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=12)
-        self.ia_log = tk.Text(tab, height=14, wrap="word")
-        self.ia_log.grid(row=7, column=0, columnspan=3, sticky="nsew")
-        tab.rowconfigure(7, weight=1)
-        ttk.Label(tab, text="Cần ffmpeg, ffprobe, pyannote.audio và quyền truy cập model pyannote/speaker-diarization-3.1. Đoạn chồng tiếng sẽ bị bỏ qua.", wraplength=850).grid(row=8, column=0, columnspan=3, sticky="w", pady=8)
+        # Indeterminate animation is intentional: diarization does not report a reliable percent.
+        self.ia_status = tk.StringVar(value="Sẵn sàng")
+        self.ia_elapsed = tk.StringVar(value="Đã chạy: 00:00:00")
+        self.ia_files = tk.StringVar(value="MP3 đã xuất: 0")
+        self.ia_started = None
+        self.ia_running = False
+        self.ia_file_count = 0
+        ia_metrics = ttk.Frame(tab)
+        ia_metrics.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 7))
+        ttk.Label(ia_metrics, textvariable=self.ia_status).pack(side="left", padx=(0, 16))
+        ttk.Label(ia_metrics, textvariable=self.ia_elapsed).pack(side="left", padx=(0, 16))
+        ttk.Label(ia_metrics, textvariable=self.ia_files).pack(side="left")
+        self.ia_progress = ttk.Progressbar(tab, mode="indeterminate")
+        self.ia_progress.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        self.ia_log = tk.Text(tab, height=11, wrap="word")
+        self.ia_log.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        tab.rowconfigure(9, weight=1)
+        ttk.Label(tab, text="Cần ffmpeg, ffprobe, pyannote.audio và quyền truy cập model pyannote/speaker-diarization-3.1. Đoạn chồng tiếng sẽ bị bỏ qua.", wraplength=850).grid(row=10, column=0, columnspan=3, sticky="w", pady=8)
 
     def ia_choose_video(self):
         value = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm"), ("All files", "*.*")])
@@ -222,8 +236,16 @@ class KhiemYoutube:
             return
         self.ia_button.configure(state="disabled")
         self.ia_log.delete("1.0", "end")
+        self.ia_started = time.monotonic()
+        self.ia_running = True
+        self.ia_file_count = 0
+        self.ia_files.set("MP3 đã xuất: 0")
+        self.ia_elapsed.set("Đã chạy: 00:00:00")
+        self.ia_status.set("Đang chuẩn bị...")
+        self.ia_progress.start(12)
+        self.ia_tick()
         def report(message):
-            self.root.after(0, lambda msg=str(message): (self.ia_log.insert("end", msg + "\\n"), self.ia_log.see("end")))
+            self.root.after(0, lambda msg=str(message): self.ia_on_message(msg))
         def work():
             try:
                 from interview_audio import export_speakers
@@ -232,8 +254,43 @@ class KhiemYoutube:
             except Exception as exc:
                 report("LỖI: " + str(exc))
             finally:
-                self.root.after(0, lambda: self.ia_button.configure(state="normal"))
+                self.root.after(0, self.ia_finish)
         threading.Thread(target=work, daemon=True).start()
+
+    def ia_tick(self):
+        if not self.ia_running:
+            return
+        seconds = int(max(0, time.monotonic() - self.ia_started))
+        self.ia_elapsed.set(f"Đã chạy: {seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}")
+        self.root.after(1000, self.ia_tick)
+
+    def ia_on_message(self, message):
+        # All widget mutations happen on Tk's main thread.
+        self.ia_log.insert("end", message + "\\n")
+        self.ia_log.see("end")
+        if message.startswith("Speaker ") and " -> " in message:
+            self.ia_file_count += 1
+            self.ia_files.set(f"MP3 đã xuất: {self.ia_file_count}")
+            self.ia_status.set("Đang xuất MP3 từng người")
+        elif message.startswith("HOÀN THÀNH"):
+            self.ia_status.set("Hoàn thành")
+        elif message.startswith("LỖI:"):
+            self.ia_status.set("Lỗi, xem nhật ký")
+        elif "Đang tải mô hình" in message:
+            self.ia_status.set("Đang tải mô hình AI")
+        elif "đang xác định" in message:
+            self.ia_status.set("AI đang phân tích người nói")
+        elif "Đang chuẩn bị audio" in message:
+            self.ia_status.set("Đang trích xuất âm thanh")
+        elif "Đã nhận diện" in message:
+            self.ia_status.set("Đã nhận diện người nói")
+        elif "Đang xuất" in message:
+            self.ia_status.set("Đang xuất MP3")
+
+    def ia_finish(self):
+        self.ia_running = False
+        self.ia_progress.stop()
+        self.ia_button.configure(state="normal")
 
     def load_settings(self):
         try:
