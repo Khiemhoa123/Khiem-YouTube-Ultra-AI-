@@ -84,20 +84,38 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     from pyannote.audio import Model, Inference
     from pyannote.core import Segment
 
-    log("V8: tải mô hình xác minh giọng nói riêng.")
+    # V8.1: use the public WeSpeaker model instead of the inaccessible
+    # pyannote/embedding repository. Support both pyannote v3/v4 APIs.
+    import inspect
+    log("V8.1: kiểm tra mô hình xác minh giọng WeSpeaker.")
+    embedding_id = "pyannote/wespeaker-voxceleb-resnet34"
     try:
-        embedding_model = Model.from_pretrained(
-            "pyannote/embedding", use_auth_token=token.strip())
+        load_args = {}
+        signature = inspect.signature(Model.from_pretrained)
+        if "token" in signature.parameters:
+            load_args["token"] = token.strip()
+        elif "use_auth_token" in signature.parameters:
+            load_args["use_auth_token"] = token.strip()
+        try:
+            embedding_model = Model.from_pretrained(embedding_id, **load_args)
+        except TypeError as exc:
+            if "token" not in str(exc) and "use_auth_token" not in str(exc):
+                raise
+            # A few older installations accept only positional model ID.
+            embedding_model = Model.from_pretrained(embedding_id)
         if embedding_model is None:
-            raise RuntimeError("Mô hình embedding trả về None.")
+            raise RuntimeError("Hugging Face không trả về mô hình.")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_model.to(device)
         embedding_infer = Inference(embedding_model, window="whole")
+        log(f"V8.1: mô hình xác minh giọng sẵn sàng trên {device}.")
     except Exception as exc:
+        detail = str(exc).replace(token.strip(), "[TOKEN]")
         raise RuntimeError(
-            "Không tải được mô hình xác minh giọng pyannote/embedding. "
-            "Cần cấp quyền model trên Hugging Face. V8 không xuất MP3 "
-            "khi thiếu bước xác minh Speaker. Chi tiết: " + str(exc)) from exc
+            "Không khởi tạo được WeSpeaker. Kiểm tra Internet, phiên bản "
+            "pyannote.audio và quyền tải mô hình "
+            + embedding_id + ". V8.1 sẽ KHÔNG xuất MP3 nếu thiếu "
+            "xác minh giọng. Lỗi: " + detail) from exc
 
     def embedding(wav, left, right):
         """Compute verified speaker embedding for a clean turn."""
@@ -162,7 +180,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             if length < 30:
                 break
             wav = temp / f"window_{part:02}.wav"
-            log(f"V8: quét đoạn {part+1}/{MAX_WINDOWS}, "
+            log(f"V8.1: quét đoạn {part+1}/{MAX_WINDOWS}, "
                 f"video {start_at:.0f}s đến {start_at+length:.0f}s.")
             _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start_at:.3f}",
                   "-i", str(video), "-t", f"{length:.3f}", "-vn",
@@ -295,6 +313,6 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         raise ValueError(
             "Không có Speaker đủ 30 giây vượt qua kiểm tra giọng nói V8. "
             "Không xuất MP3 sai. Hãy dùng video dài hơn hoặc nguồn sạch hơn.")
-    log("V8 hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
+    log("V8.1 hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
         "không bảo đảm loại bỏ mọi tiếng cười hoặc giọng chen ngang.")
     return results
