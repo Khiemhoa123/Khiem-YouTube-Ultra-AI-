@@ -46,7 +46,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         raise FileNotFoundError(video)
     if not token or not token.strip():
         raise ValueError("Cần Hugging Face token có quyền truy cập model pyannote.")
-    target_seconds = max(30, min(40, int(target_seconds)))
+    target_seconds = max(30, min(45, int(target_seconds)))
     # Automatically infer the number of speakers from the recording.
     from pyannote.audio import Pipeline
     log("Đang tải mô hình phân biệt người nói (lần đầu có thể mất thời gian).")
@@ -108,11 +108,12 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         ordered = sorted(groups, key=lambda sp: groups[sp][0][0])
         output.mkdir(parents=True, exist_ok=True)
         log(f"Đang xuất MP3 cho {len(ordered)} người nói được nhận diện.")
+        log("Bật lọc tiếng ù, giảm nhiễu và cân bằng âm lượng giọng nói.")
         results = {}
         for index, speaker in enumerate(ordered, 1):
             available = sum(b-a for a, b in groups[speaker])
             if available < 30:
-                log(f"Speaker {index:02}: chỉ có {available:.1f}s, bỏ qua (cần 30s).")
+                log(f"LỖI Speaker {index:02}: KHÔNG ĐỦ THỜI LƯỢNG ({available:.1f}s), bỏ qua.")
                 continue
             remaining = min(target_seconds, available)
             cuts = []
@@ -134,7 +135,13 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                                f"asetpts=PTS-STARTPTS,aresample=44100,"
                                f"aformat=sample_fmts=fltp:channel_layouts=mono[a{j}]")
             concat = "".join(f"[a{j}]" for j in range(len(cuts)))
-            filters.append(f"{concat}concat=n={len(cuts)}:v=0:a=1[out]")
+            filters.append(
+                f"{concat}concat=n={len(cuts)}:v=0:a=1,"
+                "highpass=f=85,lowpass=f=7600,"
+                "afftdn=nr=10:nf=-45,"
+                "acompressor=threshold=0.12:ratio=2:attack=15:release=180,"
+                "loudnorm=I=-18:TP=-2:LRA=9[out]"
+            )
             dest = output / f"Speaker_{index:02}.mp3"
             # Decode the prepared WAV rather than the original video for every speaker.
             _run(["ffmpeg", "-v", "error", "-y", "-i", str(wav),
