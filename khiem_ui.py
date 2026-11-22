@@ -166,7 +166,7 @@ class KhiemYoutube:
 
     def build_interview_audio_tab(self):
         """Standalone speaker MP3 extraction, separate from video editing."""
-        tab = ttk.Frame(self.tabs, padding=18)
+        tab = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(tab, text="05  INTERVIEW AUDIO")
         tab.columnconfigure(1, weight=1)
         self.ia_source = tk.StringVar()
@@ -175,62 +175,60 @@ class KhiemYoutube:
         self.ia_token = tk.StringVar(value=load_token())
         self.ia_token.trace_add("write", lambda *_: save_token(self.ia_token.get()))
         self.ia_seconds = tk.IntVar(value=35)
-        ttk.Label(tab, text="TÁCH GIỌNG INTERVIEW THÀNH MP3", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 14))
+        ttk.Label(tab, text="TÁCH GIỌNG INTERVIEW THÀNH MP3", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 5))
         ttk.Label(tab, text="Video phỏng vấn").grid(row=1, column=0, sticky="w")
-        ttk.Entry(tab, textvariable=self.ia_source).grid(row=1, column=1, sticky="ew", padx=8, pady=5)
+        ttk.Entry(tab, textvariable=self.ia_source).grid(row=1, column=1, sticky="ew", padx=5, pady=2)
         ttk.Button(tab, text="Chọn video", command=self.ia_choose_video).grid(row=1, column=2)
         ttk.Label(tab, text="Thư mục xuất MP3").grid(row=2, column=0, sticky="w")
-        ttk.Entry(tab, textvariable=self.ia_output).grid(row=2, column=1, sticky="ew", padx=8, pady=5)
+        ttk.Entry(tab, textvariable=self.ia_output).grid(row=2, column=1, sticky="ew", padx=5, pady=2)
         ttk.Button(tab, text="Chọn thư mục", command=self.ia_choose_output).grid(row=2, column=2)
         ttk.Label(tab, text="Hugging Face token").grid(row=3, column=0, sticky="w")
-        ttk.Entry(tab, textvariable=self.ia_token, show="*").grid(row=3, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(tab, text="Token lưu mã hóa trên máy", foreground=COLORS["muted"]).grid(row=3, column=2, sticky="w")
-        ttk.Label(tab, text="Số người nói: AI tự nhận diện theo video").grid(row=4, column=0, columnspan=3, sticky="w", pady=5)
-        ttk.Label(tab, text="Thời lượng mỗi MP3 (giây)").grid(row=5, column=0, sticky="w", pady=8)
+        ttk.Entry(tab, textvariable=self.ia_token, show="*").grid(row=3, column=1, sticky="ew", padx=5, pady=2)
+        ttk.Label(tab, text="Đã lưu token", foreground=COLORS["muted"]).grid(row=3, column=2, sticky="w")
+
+        ttk.Label(tab, text="Thời lượng mỗi MP3 (giây)").grid(row=5, column=0, sticky="w", pady=3)
         ttk.Spinbox(tab, from_=30, to=45, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
         self.ia_button = ttk.Button(tab, text="PHÂN TÍCH VÀ NGHE THỬ", command=self.ia_start)
-        self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=12)
+        self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=5)
         # V7: always-visible compact live timeline, above the preview list.
         self.ia_live_phase = tk.StringVar(value="Sẵn sàng phân tích")
         self.ia_live_window = tk.StringVar(value="Chưa quét video")
         self.ia_live_timer = tk.StringVar(value="00:00:00")
-        live = ttk.LabelFrame(tab, text="TIMELINE XỬ LÝ TRỰC TIẾP", padding=8)
-        live.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        live = ttk.LabelFrame(tab, text="TIẾN TRÌNH", padding=5)
+        live.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 3))
         live.columnconfigure(0, weight=1)
         ttk.Label(live, textvariable=self.ia_live_phase,
                   font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(live, textvariable=self.ia_live_timer,
                   font=("Consolas", 10, "bold")).grid(row=0, column=1, sticky="e")
         self.ia_live_bar = ttk.Progressbar(live, mode="indeterminate")
-        self.ia_live_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        self.ia_live_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=2)
         ttk.Label(live, textvariable=self.ia_live_window,
                   foreground=COLORS["muted"]).grid(row=2, column=0, columnspan=2, sticky="w")
         # V6: review MP3 previews before copying any selected voice to output.
         self.ia_previews = {}
         self.ia_preview_dir = None
         self.ia_player = None
-        review = ttk.LabelFrame(tab, text="NGHE THỬ VÀ CHỌN GIỌNG XUẤT", padding=8)
-        review.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        review = ttk.LabelFrame(tab, text="NGHE THỬ VÀ XUẤT", padding=5)
+        review.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 3))
         review.columnconfigure(0, weight=1)
         self.ia_voice_list = ttk.Treeview(review, columns=("length", "file"),
-                                          show="headings", height=4, selectmode="extended")
+                                          show="headings", height=3, selectmode="extended")
         self.ia_voice_list.heading("length", text="Thời lượng")
         self.ia_voice_list.heading("file", text="Giọng được AI nhận diện")
         self.ia_voice_list.column("length", width=110, stretch=False)
-        self.ia_voice_list.column("file", width=440, stretch=True)
+        self.ia_voice_list.column("file", width=260, stretch=True)
         self.ia_voice_list.grid(row=0, column=0, columnspan=3, sticky="ew")
-        self.ia_play_button = ttk.Button(review, text="▶ Nghe thử giọng đã chọn",
+        self.ia_play_button = ttk.Button(review, text="▶ Nghe",
                                          command=self.ia_play, state="disabled")
-        self.ia_play_button.grid(row=1, column=0, sticky="w", pady=6)
-        self.ia_stop_button = ttk.Button(review, text="■ Dừng nghe",
+        self.ia_play_button.grid(row=1, column=0, sticky="w", pady=2)
+        self.ia_stop_button = ttk.Button(review, text="■ Dừng",
                                          command=self.ia_stop_audio)
-        self.ia_stop_button.grid(row=1, column=1, sticky="w", pady=6)
-        self.ia_export_button = ttk.Button(review, text="XUẤT MP3 GIỌNG ĐÃ CHỌN",
+        self.ia_stop_button.grid(row=1, column=1, sticky="w", pady=2)
+        self.ia_export_button = ttk.Button(review, text="Xuất MP3",
                                            command=self.ia_export_selected, state="disabled")
-        self.ia_export_button.grid(row=1, column=2, sticky="e", pady=6)
-        ttk.Label(review, text="Giữ Ctrl hoặc Shift để chọn nhiều giọng. "
-                  "Nghe thử từng giọng rồi mới xuất.", foreground=COLORS["muted"]).grid(
-                      row=2, column=0, columnspan=3, sticky="w")
+        self.ia_export_button.grid(row=1, column=2, sticky="e", pady=2)
+
         # Compact vertical workflow. The bar indicates activity, not a guessed percent.
         self.ia_status = tk.StringVar(value="Sẵn sàng")
         self.ia_elapsed = tk.StringVar(value="00:00:00")
@@ -241,7 +239,9 @@ class KhiemYoutube:
         self.ia_file_count = 0
         self.ia_stage_index = -1
         summary = ttk.LabelFrame(tab, text="TIẾN TRÌNH XỬ LÝ", padding=10)
-        summary.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        # Keep old progress widgets for callbacks, but hide the duplicate panel.
+        summary.grid(row=9, column=0, columnspan=3, sticky="ew")
+        summary.grid_remove()
         summary.columnconfigure(0, weight=1)
         ttk.Label(summary, textvariable=self.ia_status, font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(summary, text="Thời gian:", foreground=COLORS["muted"]).grid(row=0, column=1, padx=(16, 4))
@@ -263,17 +263,17 @@ class KhiemYoutube:
             self.ia_step_labels.append(lbl)
         ttk.Label(summary, text="Số người nói:").grid(row=6, column=0, sticky="w", pady=(7, 0))
         ttk.Label(summary, textvariable=self.ia_speakers).grid(row=6, column=1, columnspan=4, sticky="w", pady=(7, 0))
-        details = ttk.LabelFrame(tab, text="NHẬT KÝ CHI TIẾT", padding=6)
+        details = ttk.LabelFrame(tab, text="NHẬT KÝ", padding=4)
         details.grid(row=10, column=0, columnspan=3, sticky="nsew")
         details.rowconfigure(0, weight=1)
         details.columnconfigure(0, weight=1)
-        self.ia_log = tk.Text(details, height=7, wrap="word", font=("Consolas", 9), spacing1=3)
+        self.ia_log = tk.Text(details, height=4, wrap="word", font=("Consolas", 9), spacing1=3)
         self.ia_log.grid(row=0, column=0, sticky="nsew")
         ia_scroll = ttk.Scrollbar(details, orient="vertical", command=self.ia_log.yview)
         ia_scroll.grid(row=0, column=1, sticky="ns")
         self.ia_log.configure(yscrollcommand=ia_scroll.set)
         tab.rowconfigure(10, weight=1)
-        ttk.Label(tab, text="Dưới 30 giây: báo lỗi và bỏ qua. Các đoạn hai người nói chồng nhau không được sử dụng.", wraplength=850).grid(row=11, column=0, columnspan=3, sticky="w", pady=8)
+
 
     def ia_choose_video(self):
         value = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm"), ("All files", "*.*")])
