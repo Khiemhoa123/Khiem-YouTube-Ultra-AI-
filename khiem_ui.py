@@ -100,7 +100,7 @@ DEFAULTS = {
 class KhiemYoutube:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("KHIEM YOUTUBE V11.3 | ULTRA AI STUDIO")
+        self.root.title("KHIEM YOUTUBE V11.5 | ULTRA AI STUDIO")
         self.root.geometry("1240x850")
         self.root.minsize(1000, 650)
         self.root.configure(bg=COLORS["bg"])
@@ -769,7 +769,7 @@ class KhiemYoutube:
 
         tk.Label(header, text="▣  KHIÊM YOUTUBE", bg=COLORS["bg"],
                  fg=COLORS["text"], font=("Segoe UI", 22, "bold")).pack(side="left")
-        tk.Label(header, text="  |  ULTRA AI STUDIO v11.3", bg=COLORS["bg"],
+        tk.Label(header, text="  |  ULTRA AI STUDIO v11.5  |  PHIEN BAN MOI", bg=COLORS["bg"],
                  fg=COLORS["accent"], font=("Segoe UI", 14, "bold")).pack(side="left")
 
         self.balance_status = tk.StringVar(value="Chưa có kết quả")
