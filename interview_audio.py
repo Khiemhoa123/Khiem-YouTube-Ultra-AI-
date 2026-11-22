@@ -9,6 +9,10 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+
+_PIPELINES = {}
+_PIPELINE_LOCK = threading.Lock()
 
 MODEL_ID = "pyannote/speaker-diarization-3.1"
 
@@ -46,9 +50,27 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     # Automatically infer the number of speakers from the recording.
     from pyannote.audio import Pipeline
     log("Đang tải mô hình phân biệt người nói (lần đầu có thể mất thời gian).")
-    pipeline = Pipeline.from_pretrained(MODEL_ID, use_auth_token=token.strip())
-    if pipeline is None:
-        raise RuntimeError("Không tải được model. Kiểm tra token và quyền truy cập.")
+    # Reuse the loaded model across videos in the same app session.
+    # Serial execution avoids racing the shared model on GPU.
+    with _PIPELINE_LOCK:
+        key = token.strip()
+        pipeline = _PIPELINES.get(key)
+        if pipeline is None:
+            pipeline = Pipeline.from_pretrained(MODEL_ID, use_auth_token=key)
+            if pipeline is None:
+                raise RuntimeError("Không tải được model. Kiểm tra token và quyền truy cập.")
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    pipeline.to(torch.device("cuda"))
+                    log("AI sử dụng GPU NVIDIA CUDA.")
+                else:
+                    log("Không có CUDA khả dụng, AI sử dụng CPU.")
+            except (ImportError, RuntimeError, AssertionError) as exc:
+                log(f"Không chuyển được sang GPU, tiếp tục với CPU: {exc}")
+            _PIPELINES[key] = pipeline
+        else:
+            log("Đã dùng lại mô hình AI trong bộ nhớ, không cần tải lại.")
     duration = _duration(video)
     log(f"Video dài {duration:.1f} giây.")
     with tempfile.TemporaryDirectory() as temp:
@@ -57,10 +79,11 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
               "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
         log("AI đang xác định thời gian nói của từng người.")
-        try:
-            diarization = pipeline(str(wav))
-        except TypeError:
-            diarization = pipeline({"audio": str(wav)})
+        with _PIPELINE_LOCK:
+            try:
+                diarization = pipeline(str(wav))
+            except TypeError:
+                diarization = pipeline({"audio": str(wav)})
         rows = _segments(diarization)
         log(f"Đã nhận diện {len(set(sp for _, _, sp in rows))} người nói, {len(rows)} lượt nói.")
         if not rows:
@@ -113,7 +136,8 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             concat = "".join(f"[a{j}]" for j in range(len(cuts)))
             filters.append(f"{concat}concat=n={len(cuts)}:v=0:a=1[out]")
             dest = output / f"Speaker_{index:02}.mp3"
-            _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
+            # Decode the prepared WAV rather than the original video for every speaker.
+            _run(["ffmpeg", "-v", "error", "-y", "-i", str(wav),
                   "-filter_complex", ";".join(filters), "-map", "[out]",
                   "-c:a", "libmp3lame", "-b:a", "192k", str(dest)])
             results[speaker] = str(dest)
