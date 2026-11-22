@@ -162,13 +162,14 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                     grouped[who].append((left, right))
         return grouped
 
-    def stable_turn(wav, left, right, reference):
+    def stable_turn(wav, left, right, reference, threshold=None):
         """Reject turns containing a second voice or an abrupt speaker change.
 
         Whole-turn embeddings can average two voices into one plausible vector.
         Verify overlapping short windows independently, including the edges.
         This is conservative and may reject legitimate speech.
         """
+        threshold = SAME if threshold is None else threshold
         length = right - left
         if length < 2.3:
             return False
@@ -182,7 +183,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             checks.append((mid, mid + check_length))
         for a, b in checks:
             vector = embedding(wav, a, b)
-            if vector is None or float(np.dot(vector, reference)) < SAME:
+            if vector is None or float(np.dot(vector, reference)) < threshold:
                 return False
         return True
 
@@ -327,7 +328,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                                 default=-1.0)
                     if scores[idx] - rival < MARGIN:
                         continue
-                    if not stable_turn(window_files[w], a, b, c["center"]):
+                    if not stable_turn(window_files[w], a, b, c["center"], threshold):
                         continue
                     if any(ww == w and not (b <= x or a >= y)
                            for other in clusters for ww, x, y in other["cuts"]):
