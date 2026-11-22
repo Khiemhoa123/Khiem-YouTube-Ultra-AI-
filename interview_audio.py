@@ -75,25 +75,25 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     log(f"Video dài {duration:.1f} giây.")
     with tempfile.TemporaryDirectory() as temp:
         wav = Path(temp) / "source.wav"
-        # Quick Scan V3: bounded single-pass diarization on a short speech-rich
+        # Quick Scan V4: bounded single-pass diarization on a short speech-rich
         # excerpt. Do not repeatedly run the heavyweight model on growing prefixes.
         # A short scan is intentionally not an exhaustive speaker census.
         import re
         import time
         max_scan = min(duration, 150.0)
-        log("Quick Scan V3: tìm lời nói, bỏ qua phần mở đầu im lặng.")
+        log("Quick Scan V4: tìm lời nói, bỏ qua phần mở đầu im lặng.")
         # FFmpeg silencedetect is cheap and avoids running the AI on empty audio.
         probe_seconds = min(duration, 240.0)
         probe = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(video),
                       "-t", f"{probe_seconds:.3f}", "-vn",
                       "-af", "silencedetect=noise=-32dB:d=0.6", "-f", "null", "-"])
         silence_ends = [float(v) for v in re.findall(
-            r"silence_end:\\s*([0-9.]+)", probe.stderr)]
+            r"silence_end:\s*([0-9.]+)", probe.stderr)]
         # If the clip opens with silence, begin immediately after it.
         start = 0.0
         if silence_ends:
             starts = [float(v) for v in re.findall(
-                r"silence_start:\\s*([0-9.]+)", probe.stderr)]
+                r"silence_start:\s*([0-9.]+)", probe.stderr)]
             if starts and starts[0] <= 0.8:
                 start = min(silence_ends[0], max(0.0, duration - 30))
         # Limit costly inference to one short contiguous excerpt first.
@@ -119,67 +119,97 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         log(f"AI hoàn tất sau {time.monotonic()-started:.0f} giây.")
         log("Chế độ nhanh chỉ phát hiện người nói trong đoạn đã quét, không phải toàn video.")
         log(f"Đã nhận diện {len(set(sp for _, _, sp in rows))} người nói, {len(rows)} lượt nói.")
-        # Exclude overlap: diarization alone cannot isolate simultaneous voices.
-        clean = []
-        for i, (a, b, speaker) in enumerate(rows):
-            if b <= a or a >= duration:
+        # Quality-first V4: never fill a target by joining tiny turns from
+        # different people. Prefer a continuous, isolated interview answer.
+        # Diarization is not source separation: reject overlaps and short turns.
+        from collections import defaultdict
+        min_seconds = 30.0
+        edge = 0.18
+        min_turn = 3.0
+        groups = defaultdict(list)
+        for a, b, speaker in rows:
+            a, b = max(0.0, a), min(duration, b)
+            if b - a < min_turn:
                 continue
-            a, b = max(0, a), min(duration, b)
-            conflicts = [(max(a, x), min(b, y)) for j, (x, y, other) in enumerate(rows)
-                         if i != j and other != speaker and x < b and y > a]
+            # Cut every overlap against any other speaker, preserving
+            # disjoint intervals (previous implementation could lose tails).
             spans = [(a, b)]
-            for x, y in sorted(conflicts):
-                spans = [(u, v) for l, r in spans
-                         for u, v in ((l, min(r, x)), (max(l, y), r)) if v-u >= .45]
-            clean.extend((u, v, speaker) for u, v in spans if v-u >= .45)
-        groups = {}
-        for a, b, speaker in sorted(clean):
-            groups.setdefault(speaker, []).append((a, b))
-        # Stable speaker numbering based on first appearance.
-        ordered = sorted(groups, key=lambda sp: groups[sp][0][0])
+            for x, y, other in rows:
+                if other == speaker or x >= b or y <= a:
+                    continue
+                new_spans = []
+                for left, right in spans:
+                    if y <= left or x >= right:
+                        new_spans.append((left, right))
+                    else:
+                        if x > left:
+                            new_spans.append((left, min(x, right)))
+                        if y < right:
+                            new_spans.append((max(y, left), right))
+                spans = new_spans
+            for left, right in spans:
+                left += edge
+                right -= edge
+                if right - left >= min_turn:
+                    groups[speaker].append((left, right))
+        ordered = sorted(groups, key=lambda sp: min(a for a, _ in groups[sp]))
         output.mkdir(parents=True, exist_ok=True)
-        log(f"Đang xuất MP3 cho {len(ordered)} người nói được nhận diện.")
-        log("Bật lọc tiếng ù, giảm nhiễu và cân bằng âm lượng giọng nói.")
+        log(f"Kiểm tra chất lượng {len(ordered)} Speaker: bỏ đoạn chồng giọng, câu quá ngắn.")
         results = {}
         for index, speaker in enumerate(ordered, 1):
-            available = sum(b-a for a, b in groups[speaker])
-            if available < 30:
-                log(f"LỖI Speaker {index:02}: KHÔNG ĐỦ THỜI LƯỢNG ({available:.1f}s), bỏ qua.")
+            spans = sorted(groups[speaker])
+            available = sum(b - a for a, b in spans)
+            # Prefer one uninterrupted answer. Only fall back to stitching
+            # longer turns when enough clean speech is available.
+            continuous = [(a, b) for a, b in spans if b - a >= min_seconds]
+            if continuous:
+                # Favor longest uninterrupted speech rather than the noisy intro.
+                a, b = max(continuous, key=lambda x: x[1] - x[0])
+                cuts = [(a, min(float(target_seconds), b - a))]
+                mode = "một đoạn liên tục"
+            else:
+                # No montage of one-word exchanges, greetings, or theme music.
+                eligible = [(a, b) for a, b in spans if b - a >= 6.0]
+                cuts = []
+                remaining = float(target_seconds)
+                for a, b in eligible:
+                    if remaining <= 0:
+                        break
+                    take = min(b - a, remaining)
+                    if take >= 3.0:
+                        cuts.append((a, take))
+                        remaining -= take
+                mode = "ghép các lượt nói dài"
+            total = sum(length for _, length in cuts)
+            if total < min_seconds - 0.05:
+                log(f"BỎ QUA Speaker {index:02}: chỉ có {total:.1f}s lời nói đủ sạch "
+                    f"(tổng nhận diện {available:.1f}s), cần ít nhất 30s.")
                 continue
-            remaining = min(target_seconds, available)
-            cuts = []
-            for a, b in groups[speaker]:
-                if remaining <= .01:
-                    break
-                length = min(b-a, remaining)
-                if length < .1:
-                    continue
-                cuts.append((a, length))
-                remaining -= length
-            if sum(t for _, t in cuts) < 29.95:
-                log(f"Speaker {index:02}: không đủ thời lượng hợp lệ.")
-                continue
-            # One filtergraph, continuous MP3, no generated/fake speech.
+            # Protect against stale MP3 from a previous run.
+            dest = output / f"Speaker_{index:02}.mp3"
             filters = []
-            for j, (start, length) in enumerate(cuts):
-                filters.append(f"[0:a]atrim=start={start:.5f}:duration={length:.5f},"
-                               f"asetpts=PTS-STARTPTS,aresample=44100,"
-                               f"aformat=sample_fmts=fltp:channel_layouts=mono[a{j}]")
+            for j, (start_at, length) in enumerate(cuts):
+                filters.append(
+                    f"[0:a]atrim=start={start_at:.5f}:duration={length:.5f},"
+                    f"asetpts=PTS-STARTPTS,aresample=44100,"
+                    f"aformat=sample_fmts=fltp:channel_layouts=mono[a{j}]"
+                )
             concat = "".join(f"[a{j}]" for j in range(len(cuts)))
             filters.append(
                 f"{concat}concat=n={len(cuts)}:v=0:a=1,"
-                "highpass=f=85,lowpass=f=7600,"
-                "afftdn=nr=10:nf=-45,"
+                "highpass=f=90,lowpass=f=7200,"
+                "afftdn=nr=12:nf=-48,"
                 "acompressor=threshold=0.12:ratio=2:attack=15:release=180,"
                 "loudnorm=I=-18:TP=-2:LRA=9[out]"
             )
-            dest = output / f"Speaker_{index:02}.mp3"
-            # Decode the prepared WAV rather than the original video for every speaker.
             _run(["ffmpeg", "-v", "error", "-y", "-i", str(wav),
                   "-filter_complex", ";".join(filters), "-map", "[out]",
                   "-c:a", "libmp3lame", "-b:a", "192k", str(dest)])
             results[speaker] = str(dest)
-            log(f"Speaker {index:02}: {sum(t for _, t in cuts):.1f}s -> {dest.name}")
+            log(f"Speaker {index:02}: {total:.1f}s, {mode}, "
+                f"{len(cuts)} đoạn -> {dest.name}")
+        log("Lưu ý: lọc nhiễu không thể loại bỏ hoàn toàn nhạc hoặc giọng "
+            "chồng nhau. Chỉ xuất khi có ít nhất 30 giây lời nói phù hợp.")
         if not results:
             raise ValueError("Không speaker nào đủ 30 giây lời nói riêng biệt.")
         return results
