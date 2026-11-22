@@ -206,8 +206,7 @@ def insert_interview_cutaways(parts, intro, c, log):
                 samples.append(t)
     samples = sorted(set(samples))
     if not samples:
-        log("INTERVIEW CUTAWAY: Không đủ đoạn có lời nói ngoài Opening.")
-        return parts
+        raise RuntimeError("Không đủ đoạn video Interview 2 giây ngoài Opening.")
 
     def splice(clips, t, src_t, number):
         for index, old in enumerate(clips):
@@ -248,9 +247,8 @@ def insert_interview_cutaways(parts, intro, c, log):
             continue
         part_start = min(float(cl["start"]) for cl in clips)
         duration = float(p.get("duration", 0))
-        if duration < 8:
-            log(f"INTERVIEW Number {number}: Quá ngắn để chèn 2 giây an toàn.")
-            continue
+        if duration < 2:
+            raise RuntimeError(f"Number {number} ngắn hơn 2 giây, không thể chèn Interview.")
         # Exactly one opening visual, plus two or three evenly spaced cutaways.
         extra = 3 if duration >= 120 else 2
         positions = [part_start] + [part_start + round((duration - 2) * i / (extra + 1) * fps) / fps for i in range(1, extra + 1)]
@@ -270,6 +268,8 @@ def insert_interview_cutaways(parts, intro, c, log):
             reserved.append((source_t, source_t + 2))
             placed += 1
             inserted += 1
+        if placed < 1:
+            raise RuntimeError(f"Number {number}: không thể chèn đoạn Interview 2 giây. Hãy bổ sung video Interview.")
         p["clips"] = clips
         log(f"INTERVIEW Number {number}: Đã chèn {placed}/{len(positions)} đoạn hình ảnh, mỗi đoạn 2 giây.")
     log(f"INTERVIEW: Tổng {inserted} cutaway 2 giây, không thay đổi độ dài voice.")
