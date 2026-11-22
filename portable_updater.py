@@ -197,7 +197,7 @@ def apply():
         raise RuntimeError("Manifest khong khop tag GitHub")
     version = manifest["version"]
     current = ROOT / "portable_version.txt"
-    if current.is_file() and current.read_text(encoding="utf-8").strip() == version:
+    if current.is_file() and current.read_text(encoding="utf-8").strip() == version and not reinstall_var.get():
         ui_dialog("info", "Khiem Youtube", "Phan mem da la phien ban moi nhat.")
         return
     if not ui_dialog("ask", "Cap nhat Khiem Youtube", f"Cai phien ban {version}?\nHay dong KhiemYoutube.exe truoc khi tiep tuc.\nCan du dung luong trong de tai va giai nen."):
@@ -300,8 +300,12 @@ def start():
         return
     running = True
     button.configure(state="disabled")
+    reinstall_checkbox.configure(state="disabled")
     threading.Thread(target=worker, daemon=True).start()
 
+reinstall_var = tk.BooleanVar(value=False)
+reinstall_checkbox = ttk.Checkbutton(frame, text="Cai lai ban hien tai (chi dung de thu nghiem tren ban sao Portable)", variable=reinstall_var)
+reinstall_checkbox.pack(anchor="w", pady=(2, 5))
 button = ttk.Button(frame, text="KIEM TRA VA CAP NHAT", command=start)
 button.pack(anchor="w", pady=8)
 
@@ -340,6 +344,7 @@ def pump():
         elif kind == "finished":
             running = False
             button.configure(state="normal")
+            reinstall_checkbox.configure(state="normal")
     window.after(100, pump)
 
 window.after(100, pump)
