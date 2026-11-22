@@ -23,6 +23,13 @@ UA = "KhiemYouTubeMedia/1.0 (Wikimedia Commons licensed media desktop client)"
 IMG = {".jpg", ".jpeg", ".png", ".webp"}
 VID = {".webm", ".mp4", ".ogv"}
 AUDIO = {".mp3", ".wav", ".m4a", ".flac"}
+SENSITIVE_TERMS = ("nude", "nudity", "naked", "topless", "bare breast", "exposed breast",
+                   "porn", "erotic", "sexually explicit", "lingerie", "see through",
+                   "upskirt", "nip slip", "wardrobe malfunction", "playboy", "onlyfans")
+def sensitive_metadata(*values):
+    text = " ".join(str(v or "") for v in values).casefold().replace("_", " ").replace("-", " ")
+    return any(term in text for term in SENSITIVE_TERMS)
+
 
 def section(p):
     m = re.match(r"^\s*(\d+)(?=\D|$)", p.stem)
@@ -141,6 +148,10 @@ def search(query, kind, stop):
 def download(page, folder, kind, known, stop):
     info=page.get("imageinfo",[{}])[0]
     meta=info.get("extmetadata",{})
+    if kind == "image" and sensitive_metadata(page.get("title"),
+            meta.get("ImageDescription", {}).get("value", ""),
+            meta.get("Categories", {}).get("value", "")):
+        return None
     def field(k): return meta.get(k,{}).get("value","")
     license_name=field("LicenseShortName")
     lic=license_name.lower().strip()
@@ -194,7 +205,7 @@ def run(root, mode, stop, log, key, voice_root=None, image_count=20, video_count
             x=quote_plus(q)
             links.append("<p>"+html.escape(q)+" | "+" | ".join(
                 '<a target="_blank" rel="noopener" href="'+html.escape(u,quote=True)+'">'+label+'</a>'
-                for label,u in [("Google Images","https://www.google.com/search?tbm=isch&q="+x),("Bing Images","https://www.bing.com/images/search?q="+x),("Getty","https://www.gettyimages.com/photos/"+x.replace("+","-")),("YouTube","https://www.youtube.com/results?search_query="+x)])+"</p>")
+                for label,u in [("Google Images","https://www.google.com/search?tbm=isch&safe=active&q="+x),("Bing Images","https://www.bing.com/images/search?adlt=strict&q="+x),("Getty","https://www.gettyimages.com/photos/"+x.replace("+","-")),("YouTube","https://www.youtube.com/results?search_query="+x)])+"</p>")
     (root/"_media_search.html").write_text("\n".join(links),encoding="utf-8")
     log("Đã lưu _media_search.html: liên kết đa nguồn để kiểm tra và chọn tư liệu có quyền sử dụng.")
     commons_blocked=False
@@ -307,7 +318,7 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
         for q in queries:
             if stop.is_set() or count>=target: break
             before={p.name for p in inbox.iterdir()}
-            url=("https://www.gettyimages.com/photos/"+quote_plus(q).replace("+","-") if source=="Getty" else "https://www.google.com/search?tbm=isch&q="+quote_plus(q))
+            url=("https://www.gettyimages.com/photos/"+quote_plus(q).replace("+","-") if source=="Getty" else "https://www.google.com/search?tbm=isch&safe=active&q="+quote_plus(q))
             advance.clear()
             subprocess.Popen([str(browser),url])
             log(f"Phần {n:02d} | {part['title']} | {count}/{target} ảnh")
@@ -325,6 +336,9 @@ def browser_images(root, key, vr, sr, ni, nv, inbox, browser, source, stop, log,
             for p in sorted(inbox.iterdir()):
                 if stop.is_set() or count>=target: break
                 if p.name in before or not p.is_file() or p.suffix.lower() not in IMG: continue
+                if sensitive_metadata(p.name):
+                    log("LOAI ANH NHAY CAM (ten file): " + p.name)
+                    continue
                 try:
                     with Image.open(p) as im:
                         w,h=im.size
