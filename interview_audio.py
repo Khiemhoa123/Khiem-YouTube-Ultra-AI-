@@ -191,6 +191,9 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     # never assumed to represent the same person.
     SAME = 0.80
     MARGIN = 0.09
+    # Adaptive thresholds only for accepting extra turns into an existing
+    # speaker. Keep the strict 0.80 identity matching across scan windows.
+    ADAPTIVE = (0.85, 0.82, 0.79, 0.76, 0.73)
     # Scan up to 24 short windows, sampling across the entire video.
     # Long interviews must not be limited to their first few minutes.
     MAX_WINDOWS = 24
@@ -200,6 +203,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         temp = Path(temp_dir)
         clusters = []
         window_files = []
+        candidate_pool = []
         # Avoid the opening sting and audience applause on long interviews.
         start_at = 60.0 if duration > 240.0 else (25.0 if duration > 85.0 else 0.0)
         available = max(0.0, duration - start_at)
@@ -267,6 +271,12 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                     clusters.append({"center": center.copy(), "cuts": [],
                                      "weight": 0.0})
                 c = clusters[idx]
+                # Retain candidates that passed local diarization, including
+                # those rejected by the strict global threshold. Recheck them
+                # after scanning, using adaptive confidence and rival margin.
+                for a, b, emb in candidates:
+                    if stable_turn(wav, a, b, reference):
+                        candidate_pool.append((part, a, b, emb, idx))
                 for a, b, emb in verified:
                     # Recheck against global identity to prevent local label
                     # leakage. Never assign one interval to two speakers.
@@ -294,6 +304,49 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             # Scan further when a speaker is still short of the target.
             if len(ready) >= 2 and part >= 3:
                 log("Đã có ít nhất hai Speaker đủ thời lượng, kết thúc quét sớm.")
+                break
+
+        # V9.2: progressive relaxation of segment acceptance only.
+        # A candidate must match its assigned cluster better than any rival,
+        # must pass local consistency, and must not overlap any accepted cut.
+        # We never merge clusters using the relaxed threshold.
+        for threshold in ADAPTIVE:
+            for idx, c in enumerate(clusters):
+                seconds = sum(b-a for _, a, b in c["cuts"])
+                if seconds >= 30.0:
+                    continue
+                proposals = []
+                for w, a, b, emb, assigned in candidate_pool:
+                    if assigned != idx:
+                        continue
+                    scores = [float(np.dot(emb, other["center"]))
+                              for other in clusters]
+                    if not scores or scores[idx] < threshold:
+                        continue
+                    rival = max((score for k, score in enumerate(scores) if k != idx),
+                                default=-1.0)
+                    if scores[idx] - rival < MARGIN:
+                        continue
+                    if not stable_turn(window_files[w], a, b, c["center"]):
+                        continue
+                    if any(ww == w and not (b <= x or a >= y)
+                           for other in clusters for ww, x, y in other["cuts"]):
+                        continue
+                    proposals.append((scores[idx], w, a, b))
+                proposals.sort(reverse=True)
+                for confidence, w, a, b in proposals:
+                    if any(ww == w and not (b <= x or a >= y)
+                           for other in clusters for ww, x, y in other["cuts"]):
+                        continue
+                    c["cuts"].append((w, a, b))
+                    seconds += b-a
+                    if seconds >= 30.0:
+                        break
+                log(f"V9.2 Speaker {idx+1:02} | Ngưỡng {threshold:.2f} | "
+                    f"Đã xác minh {seconds:.1f}/30s"
+                    + (" | ĐẠT" if seconds >= 30.0 else " | Cần thêm"))
+            if all(sum(b-a for _, a, b in c["cuts"]) >= 30.0
+                   for c in clusters):
                 break
 
         exported = 0
@@ -358,6 +411,6 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             "30 giây giọng được xác minh cho một Speaker. "
             "Đây là thiếu dữ liệu ĐẠT NGƯỠNG AI, không khẳng định video "
             "thiếu lời nói. Hãy xem nhật ký số giây của từng Speaker.")
-    log("V9.1 Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
+    log("V9.2 Adaptive Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
         "không bảo đảm loại bỏ mọi tiếng cười hoặc giọng chen ngang.")
     return results
