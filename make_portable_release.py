@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "dist_portable" / "KhiemYoutube"
 OUTPUT = ROOT / "portable_release_assets"
-VERSION = "v11.4"
+VERSION = "v11.5"
 PART_SIZE = 1500 * 1024 * 1024  # 1,500 MiB, below GitHub's 2 GiB limit
 EXCLUDE_DIRS = {"models", "tools", "_PORTABLE_BACKUP", "_AUTO_UPDATE_BACKUPS"}
 EXCLUDE_FILES = {"KhiemUpdater.exe", "portable_version.txt", "khiem_settings.json", "project_queue_v11.json"}
