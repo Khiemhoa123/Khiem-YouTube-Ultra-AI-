@@ -1,17 +1,24 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
+title KHIEM YOUTUBE - TAO GOI CAP NHAT V11.4
 echo ==========================================
-echo   KHIEM YOUTUBE - TAO GOI UPDATE V11.4
+echo     TAO LAI GOI UPDATE V11.4 TU DAU
 echo ==========================================
-python make_portable_release.py
+echo.
+where py >nul 2>nul
+if not errorlevel 1 (
+  py -3 -u "%~dp0make_portable_release.py"
+) else (
+  python -u "%~dp0make_portable_release.py"
+)
 if errorlevel 1 (
   echo.
-  echo TAO GOI THAT BAI. Chup anh cua so nay gui ChatGPT.
+  echo CO LOI! Chup anh cua so nay gui ChatGPT.
   pause
   exit /b 1
 )
 echo.
-echo Mo thu muc portable_release_assets de tai 2 file len GitHub.
+echo DA HOAN TAT. Mo thu muc chua ZIP va JSON...
 explorer "%~dp0portable_release_assets"
 pause
