@@ -175,7 +175,6 @@ class KhiemYoutube:
         self.ia_token = tk.StringVar(value=load_token())
         self.ia_token.trace_add("write", lambda *_: save_token(self.ia_token.get()))
         self.ia_seconds = tk.IntVar(value=35)
-        self.ia_speakers = tk.IntVar(value=3)
         ttk.Label(tab, text="TÁCH GIỌNG INTERVIEW THÀNH MP3", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 14))
         ttk.Label(tab, text="Video phỏng vấn").grid(row=1, column=0, sticky="w")
         ttk.Entry(tab, textvariable=self.ia_source).grid(row=1, column=1, sticky="ew", padx=8, pady=5)
@@ -186,8 +185,7 @@ class KhiemYoutube:
         ttk.Label(tab, text="Hugging Face token").grid(row=3, column=0, sticky="w")
         ttk.Entry(tab, textvariable=self.ia_token, show="*").grid(row=3, column=1, sticky="ew", padx=8, pady=5)
         ttk.Label(tab, text="Token lưu mã hóa trên máy", foreground=COLORS["muted"]).grid(row=3, column=2, sticky="w")
-        ttk.Label(tab, text="Số người nói").grid(row=4, column=0, sticky="w")
-        ttk.Combobox(tab, textvariable=self.ia_speakers, values=(2, 3), state="readonly", width=10).grid(row=4, column=1, sticky="w", padx=8)
+        ttk.Label(tab, text="Số người nói: AI tự nhận diện theo video").grid(row=4, column=0, columnspan=3, sticky="w", pady=5)
         ttk.Label(tab, text="Thời lượng mỗi MP3 (giây)").grid(row=5, column=0, sticky="w", pady=8)
         ttk.Spinbox(tab, from_=30, to=40, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
         self.ia_button = ttk.Button(tab, text="TÁCH SPEAKER VÀ XUẤT MP3", command=self.ia_start)
@@ -217,9 +215,8 @@ class KhiemYoutube:
             return
         try:
             seconds = int(self.ia_seconds.get())
-            speakers = int(self.ia_speakers.get())
-            if not 30 <= seconds <= 40 or speakers not in (2, 3):
-                raise ValueError("Chọn 30 đến 40 giây và 2 hoặc 3 người nói.")
+            if not 30 <= seconds <= 40:
+                raise ValueError("Chọn thời lượng từ 30 đến 40 giây.")
         except (ValueError, tk.TclError) as exc:
             messagebox.showerror("Interview Audio", str(exc))
             return
@@ -230,7 +227,7 @@ class KhiemYoutube:
         def work():
             try:
                 from interview_audio import export_speakers
-                result = export_speakers(source, output, token, seconds, speakers, report)
+                result = export_speakers(source, output, token, seconds, log=report)
                 report(f"HOÀN THÀNH: {len(result)} file MP3.")
             except Exception as exc:
                 report("LỖI: " + str(exc))
