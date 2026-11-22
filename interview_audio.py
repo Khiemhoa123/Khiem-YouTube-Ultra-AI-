@@ -75,110 +75,49 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     log(f"Video dài {duration:.1f} giây.")
     with tempfile.TemporaryDirectory() as temp:
         wav = Path(temp) / "source.wav"
-        # Turbo Scan V2: diarize only new 60-second windows, with a 15-second
-        # overlap to align speaker IDs. Never blindly equate local speaker labels.
-        # If alignment is ambiguous, fall back to a single full-prefix scan
-        # before exporting, prioritizing correct speaker grouping over speed.
-        import math
-        window = 60.0
-        overlap = 15.0
-        cursor = 0.0
-        rows = []
-        next_id = 1
-        need_prefix_check = False
-        scan_end = 0.0
-        while cursor < duration - .01:
-            begin = max(0.0, cursor - overlap if cursor else 0.0)
-            end = min(duration, cursor + window)
-            log(f"Turbo Scan: đang chuẩn bị audio {begin:.0f} đến {end:.0f}/{duration:.0f} giây.")
-            chunk = Path(temp) / "chunk.wav"
-            _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{begin:.3f}",
-                  "-i", str(video), "-t", f"{end-begin:.3f}", "-vn",
-                  "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(chunk)])
-            log(f"AI đang xác định người nói trong đoạn mới {end-begin:.0f} giây.")
-            with _PIPELINE_LOCK:
-                try:
-                    diarization = pipeline(str(chunk))
-                except TypeError:
-                    diarization = pipeline({"audio": str(chunk)})
-            local = [(a+begin, b+begin, sp) for a, b, sp in _segments(diarization)]
-            local_ids = sorted({sp for _, _, sp in local})
-            mapping = {}
-            if not rows:
-                for sp in local_ids:
-                    mapping[sp] = f"SPEAKER_{next_id:03}"
-                    next_id += 1
-            else:
-                # Compare diarized turns within the shared 15-second boundary.
-                # A local label must have one clear match to an existing speaker.
-                scores = {}
-                for sp in local_ids:
-                    for old in {label for _, _, label in rows}:
-                        score = sum(max(0.0, min(b, y, cursor) - max(a, x, begin))
-                                    for a, b, label in local if label == sp
-                                    for x, y, prev in rows if prev == old)
-                        if score > 0:
-                            scores[(sp, old)] = score
-                assigned_old = set()
-                for sp in sorted(local_ids, key=lambda k: -max(
-                        [v for (key, _), v in scores.items() if key == k] or [0])):
-                    candidates = sorted(((v, old) for (key, old), v in scores.items()
-                                         if key == sp and old not in assigned_old), reverse=True)
-                    if candidates and candidates[0][0] >= 1.0 and (
-                            len(candidates) == 1 or candidates[0][0] >= candidates[1][0] * 1.5):
-                        mapping[sp] = candidates[0][1]
-                        assigned_old.add(candidates[0][1])
-                    else:
-                        # Cannot know if this is a new person or a returning speaker.
-                        # A full-prefix reconciliation is safer than silently mixing.
-                        need_prefix_check = True
-                        mapping[sp] = f"SPEAKER_{next_id:03}"
-                        next_id += 1
-                if need_prefix_check:
-                    log("Ranh giới người nói chưa rõ, sẽ đối chiếu lại trước khi xuất.")
-            rows.extend((max(a, cursor), b, mapping[sp]) for a, b, sp in local
-                        if b > cursor + .01 and b > a)
-            scan_end = end
-            log(f"Đã quét {scan_end:.0f}/{duration:.0f} giây; đang kiểm tra thời lượng.")
-            # Count only intervals not overlapped by a different speaker.
-            usable = {}
-            for i, (a, b, speaker) in enumerate(rows):
-                spans = [(a, b)]
-                for x, y, other in rows:
-                    if other == speaker or x >= b or y <= a:
-                        continue
-                    spans = [(u, v) for l, r in spans
-                             for u, v in ((l, min(r, x)), (max(l, y), r))
-                             if v-u >= .45]
-                usable[speaker] = usable.get(speaker, 0.0) + sum(
-                    v-u for u, v in spans if v-u >= .45)
-            if usable and all(v >= target_seconds + .2 for v in usable.values()):
-                log("Đủ thời lượng cho các người nói đã phát hiện, dừng quét sớm.")
-                break
-            if end >= duration - .01:
-                break
-            cursor = end
-            log("Chưa đủ lời nói hợp lệ, chỉ quét thêm 60 giây mới.")
-        duration = scan_end
-        if need_prefix_check:
-            # Speaker identity is not reliably comparable between isolated chunks.
-            # Reconcile labels once, on the scanned prefix, only when needed.
-            log("Đang đối chiếu speaker trên phạm vi đã quét để tránh ghép nhầm giọng.")
-            _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
-                  "-t", f"{duration:.3f}", "-vn", "-ac", "1", "-ar", "16000",
-                  "-c:a", "pcm_s16le", str(wav)])
-            with _PIPELINE_LOCK:
-                try:
-                    diarization = pipeline(str(wav))
-                except TypeError:
-                    diarization = pipeline({"audio": str(wav)})
-            rows = _segments(diarization)
-        else:
-            # WAV is also used for MP3 export. Build it once at the end.
-            log("Đang chuẩn bị âm thanh nguồn để xuất MP3.")
-            _run(["ffmpeg", "-v", "error", "-y", "-i", str(video),
-                  "-t", f"{duration:.3f}", "-vn", "-ac", "1", "-ar", "16000",
-                  "-c:a", "pcm_s16le", str(wav)])
+        # Quick Scan V3: bounded single-pass diarization on a short speech-rich
+        # excerpt. Do not repeatedly run the heavyweight model on growing prefixes.
+        # A short scan is intentionally not an exhaustive speaker census.
+        import re
+        import time
+        max_scan = min(duration, 150.0)
+        log("Quick Scan V3: tìm lời nói, bỏ qua phần mở đầu im lặng.")
+        # FFmpeg silencedetect is cheap and avoids running the AI on empty audio.
+        probe_seconds = min(duration, 240.0)
+        probe = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(video),
+                      "-t", f"{probe_seconds:.3f}", "-vn",
+                      "-af", "silencedetect=noise=-32dB:d=0.6", "-f", "null", "-"])
+        silence_ends = [float(v) for v in re.findall(
+            r"silence_end:\\s*([0-9.]+)", probe.stderr)]
+        # If the clip opens with silence, begin immediately after it.
+        start = 0.0
+        if silence_ends:
+            starts = [float(v) for v in re.findall(
+                r"silence_start:\\s*([0-9.]+)", probe.stderr)]
+            if starts and starts[0] <= 0.8:
+                start = min(silence_ends[0], max(0.0, duration - 30))
+        # Limit costly inference to one short contiguous excerpt first.
+        # The same source WAV is used for exporting to avoid decoding the video twice.
+        scan_length = min(max_scan, max(0.0, duration - start))
+        if scan_length < 30:
+            raise ValueError("Video không đủ 30 giây âm thanh để trích xuất.")
+        log(f"Quick Scan: trích âm thanh {start:.0f} đến {start+scan_length:.0f} giây.")
+        _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}",
+              "-i", str(video), "-t", f"{scan_length:.3f}", "-vn",
+              "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+        # One diarization pass rather than repeated window inference.
+        # The cap prevents a multi-hour recording from becoming a multi-hour scan.
+        log(f"AI phân tích một lần trên {scan_length:.0f} giây âm thanh.")
+        started = time.monotonic()
+        with _PIPELINE_LOCK:
+            try:
+                diarization = pipeline(str(wav))
+            except TypeError:
+                diarization = pipeline({"audio": str(wav)})
+        rows = _segments(diarization)
+        duration = scan_length
+        log(f"AI hoàn tất sau {time.monotonic()-started:.0f} giây.")
+        log("Chế độ nhanh chỉ phát hiện người nói trong đoạn đã quét, không phải toàn video.")
         log(f"Đã nhận diện {len(set(sp for _, _, sp in rows))} người nói, {len(rows)} lượt nói.")
         # Exclude overlap: diarization alone cannot isolate simultaneous voices.
         clean = []
