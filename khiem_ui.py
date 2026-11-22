@@ -188,8 +188,34 @@ class KhiemYoutube:
         ttk.Label(tab, text="Số người nói: AI tự nhận diện theo video").grid(row=4, column=0, columnspan=3, sticky="w", pady=5)
         ttk.Label(tab, text="Thời lượng mỗi MP3 (giây)").grid(row=5, column=0, sticky="w", pady=8)
         ttk.Spinbox(tab, from_=30, to=45, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
-        self.ia_button = ttk.Button(tab, text="TÁCH SPEAKER VÀ XUẤT MP3", command=self.ia_start)
+        self.ia_button = ttk.Button(tab, text="PHÂN TÍCH VÀ NGHE THỬ", command=self.ia_start)
         self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=12)
+        # V6: review MP3 previews before copying any selected voice to output.
+        self.ia_previews = {}
+        self.ia_preview_dir = None
+        self.ia_player = None
+        review = ttk.LabelFrame(tab, text="NGHE THỬ VÀ CHỌN GIỌNG XUẤT", padding=8)
+        review.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        review.columnconfigure(0, weight=1)
+        self.ia_voice_list = ttk.Treeview(review, columns=("length", "file"),
+                                          show="headings", height=4, selectmode="extended")
+        self.ia_voice_list.heading("length", text="Thời lượng")
+        self.ia_voice_list.heading("file", text="Giọng được AI nhận diện")
+        self.ia_voice_list.column("length", width=110, stretch=False)
+        self.ia_voice_list.column("file", width=440, stretch=True)
+        self.ia_voice_list.grid(row=0, column=0, columnspan=3, sticky="ew")
+        self.ia_play_button = ttk.Button(review, text="▶ Nghe thử giọng đã chọn",
+                                         command=self.ia_play, state="disabled")
+        self.ia_play_button.grid(row=1, column=0, sticky="w", pady=6)
+        self.ia_stop_button = ttk.Button(review, text="■ Dừng nghe",
+                                         command=self.ia_stop_audio)
+        self.ia_stop_button.grid(row=1, column=1, sticky="w", pady=6)
+        self.ia_export_button = ttk.Button(review, text="XUẤT MP3 GIỌNG ĐÃ CHỌN",
+                                           command=self.ia_export_selected, state="disabled")
+        self.ia_export_button.grid(row=1, column=2, sticky="e", pady=6)
+        ttk.Label(review, text="Giữ Ctrl hoặc Shift để chọn nhiều giọng. "
+                  "Nghe thử từng giọng rồi mới xuất.", foreground=COLORS["muted"]).grid(
+                      row=2, column=0, columnspan=3, sticky="w")
         # Compact vertical workflow. The bar indicates activity, not a guessed percent.
         self.ia_status = tk.StringVar(value="Sẵn sàng")
         self.ia_elapsed = tk.StringVar(value="00:00:00")
@@ -200,7 +226,7 @@ class KhiemYoutube:
         self.ia_file_count = 0
         self.ia_stage_index = -1
         summary = ttk.LabelFrame(tab, text="TIẾN TRÌNH XỬ LÝ", padding=10)
-        summary.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        summary.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         summary.columnconfigure(0, weight=1)
         ttk.Label(summary, textvariable=self.ia_status, font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(summary, text="Thời gian:", foreground=COLORS["muted"]).grid(row=0, column=1, padx=(16, 4))
@@ -223,7 +249,7 @@ class KhiemYoutube:
         ttk.Label(summary, text="Số người nói:").grid(row=6, column=0, sticky="w", pady=(7, 0))
         ttk.Label(summary, textvariable=self.ia_speakers).grid(row=6, column=1, columnspan=4, sticky="w", pady=(7, 0))
         details = ttk.LabelFrame(tab, text="NHẬT KÝ CHI TIẾT", padding=6)
-        details.grid(row=8, column=0, columnspan=3, sticky="nsew")
+        details.grid(row=9, column=0, columnspan=3, sticky="nsew")
         details.rowconfigure(0, weight=1)
         details.columnconfigure(0, weight=1)
         self.ia_log = tk.Text(details, height=7, wrap="word", font=("Consolas", 9), spacing1=3)
@@ -231,8 +257,8 @@ class KhiemYoutube:
         ia_scroll = ttk.Scrollbar(details, orient="vertical", command=self.ia_log.yview)
         ia_scroll.grid(row=0, column=1, sticky="ns")
         self.ia_log.configure(yscrollcommand=ia_scroll.set)
-        tab.rowconfigure(8, weight=1)
-        ttk.Label(tab, text="Dưới 30 giây: báo lỗi và bỏ qua. Các đoạn hai người nói chồng nhau không được sử dụng.", wraplength=850).grid(row=9, column=0, columnspan=3, sticky="w", pady=8)
+        tab.rowconfigure(9, weight=1)
+        ttk.Label(tab, text="Dưới 30 giây: báo lỗi và bỏ qua. Các đoạn hai người nói chồng nhau không được sử dụng.", wraplength=850).grid(row=10, column=0, columnspan=3, sticky="w", pady=8)
 
     def ia_choose_video(self):
         value = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm"), ("All files", "*.*")])
@@ -259,6 +285,16 @@ class KhiemYoutube:
         except (ValueError, tk.TclError) as exc:
             messagebox.showerror("Interview Audio", str(exc))
             return
+        self.ia_stop_audio()
+        import shutil
+        if self.ia_preview_dir:
+            shutil.rmtree(self.ia_preview_dir, ignore_errors=True)
+        self.ia_preview_dir = None
+        self.ia_previews.clear()
+        for item in self.ia_voice_list.get_children():
+            self.ia_voice_list.delete(item)
+        self.ia_play_button.configure(state="disabled")
+        self.ia_export_button.configure(state="disabled")
         self.ia_button.configure(state="disabled")
         self.ia_log.delete("1.0", "end")
         self.ia_started = time.monotonic()
@@ -277,13 +313,88 @@ class KhiemYoutube:
         def work():
             try:
                 from interview_audio import export_speakers
-                result = export_speakers(source, output, token, seconds, log=report)
-                report(f"HOÀN THÀNH: {len(result)} file MP3.")
+                import tempfile
+                preview_dir = tempfile.mkdtemp(prefix="khiem_interview_review_")
+                self.ia_preview_dir = preview_dir
+                result = export_speakers(source, preview_dir, token, seconds, log=report)
+                self.root.after(0, lambda data=dict(result): self.ia_ready(data))
+                report(f"ĐÃ PHÂN TÍCH: {len(result)} giọng. Nghe thử và chọn giọng để xuất.")
             except Exception as exc:
                 report("LỖI: " + str(exc))
             finally:
                 self.root.after(0, self.ia_finish)
         threading.Thread(target=work, daemon=True).start()
+
+    def ia_ready(self, results):
+        from pathlib import Path
+        from interview_audio import _duration
+        self.ia_previews = dict(results)
+        for key, path in results.items():
+            try:
+                seconds = _duration(path)
+            except Exception:
+                seconds = 0
+            self.ia_voice_list.insert("", "end", iid=str(key),
+                                      values=(f"{seconds:.1f} giây", Path(path).name))
+        if results:
+            first = next(iter(results))
+            self.ia_voice_list.selection_set(first)
+            self.ia_play_button.configure(state="normal")
+            self.ia_export_button.configure(state="normal")
+            self.ia_status.set("Đã phân tích. Hãy nghe thử và chọn giọng.")
+        else:
+            self.ia_status.set("Không có giọng đủ 30 giây để nghe thử.")
+
+    def ia_stop_audio(self):
+        player = getattr(self, "ia_player", None)
+        if player is not None and player.poll() is None:
+            player.terminate()
+        self.ia_player = None
+
+    def ia_play(self):
+        selected = self.ia_voice_list.selection()
+        if not selected:
+            messagebox.showinfo("Interview Audio", "Hãy chọn một giọng để nghe thử.")
+            return
+        path = self.ia_previews.get(selected[0])
+        if not path:
+            return
+        self.ia_stop_audio()
+        import shutil
+        import subprocess
+        ffplay = shutil.which("ffplay")
+        if ffplay:
+            self.ia_player = subprocess.Popen(
+                [ffplay, "-nodisp", "-autoexit", "-loglevel", "error", str(path)],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            os.startfile(str(path))
+            self.ia_on_message("Máy chưa có ffplay. Đã mở file bằng trình nghe MP3 mặc định.")
+
+    def ia_export_selected(self):
+        selected = self.ia_voice_list.selection()
+        if not selected:
+            messagebox.showwarning("Interview Audio", "Chọn ít nhất một giọng để xuất.")
+            return
+        import shutil
+        output = Path(self.ia_output.get().strip())
+        output.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for key in selected:
+            src = self.ia_previews.get(key)
+            if not src or not Path(src).is_file():
+                continue
+            base = Path(src).name
+            dest = output / base
+            index = 2
+            while dest.exists():
+                dest = output / f"{Path(base).stem}_{index}.mp3"
+                index += 1
+            shutil.copy2(src, dest)
+            count += 1
+            self.ia_on_message(f"Đã xuất: {dest}")
+        self.ia_files.set(str(count))
+        messagebox.showinfo("Interview Audio", f"Đã xuất {count} MP3 vào:\\n{output}")
 
     def ia_tick(self):
         if not self.ia_running:
