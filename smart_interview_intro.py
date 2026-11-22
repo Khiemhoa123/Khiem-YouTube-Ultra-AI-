@@ -7,6 +7,7 @@ import re
 import subprocess
 import tempfile
 import os
+import random
 
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
@@ -106,7 +107,10 @@ def choose_intro(c, log):
                     # Prefer coherent passages with complete ending punctuation.
                     if phrase.rstrip().endswith((".", "?", "!")):
                         score += 0.03
-                    candidates.append((score, str(path), float(first.start), dur, phrase))
+                    item = (score, str(path), float(first.start), dur, phrase)
+                    candidates.append(item)
+                    if len(_tokens(phrase)) >= 8:
+                        fallback.append(item)
         except Exception as exc:
             log("Không phân tích được " + path.name + ": " + str(exc))
     if candidates:
@@ -115,15 +119,20 @@ def choose_intro(c, log):
         log("Top đoạn phỏng vấn (điểm khớp từ ngữ, chưa xác minh khuôn mặt):")
         for score, path, start, dur, phrase in candidates[:3]:
             log(f"  {Path(path).name} | {start:.1f}s | {dur:.1f}s | {score:.2f} | {phrase[:100]}")
-        if best[0] < 0.12 or _similarity(script, best[4]) < 0.09:
-            log("Bỏ Interview: không có đoạn đủ phù hợp.")
-            return None
-        c["_interview_sample_rows"] = [(r.start,r.end,r.text) for r in sampled[best[1]]]
-        return {"source": best[1], "source_start": best[2],
-                "duration": best[3], "transcript": best[4], "score": best[0]}
-    log("Bỏ Interview: không có đoạn phù hợp.")
+        if best[0] >= 0.12 and _similarity(script, best[4]) >= 0.09:
+            c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[best[1]]]
+            return {'source':best[1], 'source_start':best[2], 'duration':best[3], 'transcript':best[4], 'score':best[0], 'selection_mode':'matched'}
+    if fallback:
+        def curiosity(item):
+            phrase = item[4]
+            return (2 if '?' in phrase else 1 if '!' in phrase else 0) + (1 if phrase.rstrip().endswith(('.', '?', '!')) else 0) + min(len(_tokens(phrase)), 24)/24
+        ranked = sorted(fallback, key=curiosity, reverse=True)
+        score, path, start, dur, phrase = random.SystemRandom().choice(ranked[:5])
+        c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[path]]
+        log(f'INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {dur:.1f}s | co loi noi, chua xac minh khuon mat.')
+        return {'source':path, 'source_start':start, 'duration':dur, 'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
+    log('Bo Interview: khong co doan noi chuyen hop le.')
     return None
-
 
 def prepend_mp4(c, intro, log):
     """Prepend interview with original sound. Re-encode for reliable A/V sync."""
