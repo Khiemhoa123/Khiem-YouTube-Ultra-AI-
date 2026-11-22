@@ -151,6 +151,20 @@ def main():
     missing_files = [str(x) for x in checks if not x.is_file()]
     if missing_files:
         raise RuntimeError("Đóng gói thiếu file: " + "; ".join(missing_files))
+    # Build a small independent updater EXE, separate from the frozen main application.
+    updater_cmd = [
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+        "--onefile", "--windowed", "--name", "KhiemUpdater",
+        "--distpath", str(output), "--workpath", str(WORK / "updater"),
+        "--specpath", str(WORK), str(ROOT / "portable_updater.py")
+    ]
+    say("Đang tạo KhiemUpdater.exe...")
+    updater_result = subprocess.run(updater_cmd, cwd=ROOT, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace")
+    with LOG.open("a", encoding="utf-8") as logfile:
+        logfile.write(updater_result.stdout)
+    if updater_result.returncode or not (output / "KhiemUpdater.exe").is_file():
+        raise RuntimeError("Không tạo được KhiemUpdater.exe. Xem build_portable.log.")
     (output / "README_PORTABLE.txt").write_text(
         "KHIEM YOUTUBE PORTABLE FULL OFFLINE\n"
         "Chép toàn bộ thư mục KhiemYoutube sang máy khác, chạy KhiemYoutube.exe.\n"
