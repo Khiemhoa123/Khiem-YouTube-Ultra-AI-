@@ -434,6 +434,14 @@ class KhiemYoutube:
                 label.configure(text="○  " + self.ia_steps[i], foreground=COLORS["muted"])
 
     def ia_on_message(self, message):
+        if message.startswith("LỖI:"):
+            self.ia_live_phase.set("LỖI: Không thể hoàn tất phân tích")
+            self.ia_live_window.set(message[:190])
+            self.ia_status.set("Đã dừng do lỗi, xem Nhật ký.")
+        elif "V8.1: kiểm tra mô hình" in message:
+            self.ia_live_phase.set("Đang kiểm tra mô hình WeSpeaker")
+        elif "V8.1: mô hình xác minh giọng sẵn sàng" in message:
+            self.ia_live_phase.set("Mô hình sẵn sàng, chuẩn bị quét")
         # Separate each log event onto its own line, not a continuous string.
         self.ia_log.insert("end", message + "\n")
         self.ia_log.see("end")
