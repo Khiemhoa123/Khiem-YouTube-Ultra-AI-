@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Khiem Youtube Portable updater. Supports SHA256-verified multipart GitHub releases."""
 import hashlib
+import queue
+import threading
+import urllib.error
 import json
 import os
 import shutil
@@ -16,7 +19,21 @@ from tkinter import ttk, messagebox
 REPO = "Khiemhoa123/Khiem-YouTube-Ultra-AI-"
 ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 API = "https://api.github.com/repos/" + REPO + "/releases/latest"
-CHUNK = 4 * 1024 * 1024
+CHUNK = 1024 * 1024
+EVENTS = queue.Queue()
+DOWNLOAD_STATE = {"done": 0, "total": 0, "started": 0.0}
+
+def report(message):
+    EVENTS.put(("status", message))
+
+def ui_dialog(kind, title, message):
+    reply = queue.Queue(maxsize=1)
+    EVENTS.put(("dialog", kind, title, message, reply))
+    return reply.get()
+
+def report_progress(filename, received, size, global_done, global_total, speed):
+    EVENTS.put(("progress", filename, received, size, global_done, global_total, speed))
+
 PROTECTED = {"models", "tools", "_PORTABLE_BACKUP", "_AUTO_UPDATE_BACKUPS"}
 PROTECTED_FILES = {"KhiemUpdater.exe", "khiem_settings.json", "project_queue_v11.json", "portable_version.txt"}
 
@@ -34,26 +51,64 @@ def sha256(path):
             h.update(block)
     return h.hexdigest()
 
-def download(url, target, expected_size=None, expected_sha=None):
-    h = hashlib.sha256()
-    total = 0
-    with urllib.request.urlopen(request(url), timeout=120) as response, target.open("wb") as out:
-        while True:
-            data = response.read(CHUNK)
-            if not data:
-                break
-            out.write(data)
-            h.update(data)
-            total += len(data)
-            if expected_size:
-                status.set(f"Dang tai {target.name}: {total * 100 // expected_size}%")
-            else:
-                status.set(f"Dang tai {target.name}: {total // (1024 * 1024)} MiB")
-            window.update_idletasks()
-    if expected_size is not None and total != expected_size:
-        raise RuntimeError(f"Sai dung luong {target.name}: {total} != {expected_size}")
-    if expected_sha and h.hexdigest().lower() != expected_sha.lower():
-        raise RuntimeError("SHA256 khong khop: " + target.name)
+def download(url, target, expected_size=None, expected_sha=None, base_done=0, grand_total=None):
+    """Resume partial downloads with HTTP Range, retry network failures."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    total_size = expected_size or 0
+    last_update = 0.0
+    for attempt in range(7):
+        offset = target.stat().st_size if target.exists() else 0
+        if expected_size and offset > expected_size:
+            target.unlink()
+            offset = 0
+        if expected_size and offset == expected_size:
+            if not expected_sha or sha256(target).lower() == expected_sha.lower():
+                report_progress(target.name, offset, expected_size, base_done + offset, grand_total or expected_size, 0)
+                return
+            target.unlink()
+            offset = 0
+        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        req = request(url)
+        for key, value in headers.items():
+            req.add_header(key, value)
+        try:
+            with urllib.request.urlopen(req, timeout=45) as response:
+                code = response.getcode()
+                if offset and code != 206:
+                    # Server ignored Range; restart rather than append duplicate bytes.
+                    offset = 0
+                    target.unlink(missing_ok=True)
+                if offset and code == 206:
+                    content_range = response.headers.get("Content-Range", "")
+                    if not content_range.startswith(f"bytes {offset}-"):
+                        raise RuntimeError("May chu tra ve Range khong dung")
+                started = time.monotonic()
+                initial = offset
+                with target.open("ab" if offset else "wb") as out:
+                    while True:
+                        data = response.read(CHUNK)
+                        if not data:
+                            break
+                        out.write(data)
+                        offset += len(data)
+                        now = time.monotonic()
+                        if now - last_update >= 0.25:
+                            speed = (offset - initial) / max(now - started, 0.1)
+                            report_progress(target.name, offset, total_size, base_done + offset, grand_total or total_size, speed)
+                            last_update = now
+            if expected_size is not None and offset != expected_size:
+                raise IOError(f"Tai chua du {target.name}: {offset}/{expected_size}")
+            if expected_sha and sha256(target).lower() != expected_sha.lower():
+                target.unlink(missing_ok=True)
+                raise RuntimeError("SHA256 khong khop: " + target.name)
+            report_progress(target.name, offset, total_size or offset, base_done + offset, grand_total or total_size or offset, 0)
+            return
+        except (OSError, urllib.error.URLError, RuntimeError) as exc:
+            if attempt == 6:
+                raise RuntimeError(f"Tai {target.name} that bai sau 7 lan thu: {exc}") from exc
+            report(f"Ket noi gian doan, thu lai lan {attempt + 2}/7: {target.name}")
+            time.sleep(min(2 ** attempt, 15))
+
 
 def valid_part(part):
     if not isinstance(part, dict):
@@ -83,23 +138,28 @@ def get_archive(release, manifest, assets, work):
                 raise RuntimeError("GitHub Release thieu " + part["name"])
         if manifest.get("zip_size") != sum(p["size"] for p in parts):
             raise RuntimeError("Tong dung luong manifest khong khop")
-        # Stream parts into one ZIP; never keep multi-GB downloads in RAM.
+        grand_total = sum(p["size"] for p in parts)
+        done = 0
+        for index, part in enumerate(parts, 1):
+            report(f"Dang tai phan {index}/{len(parts)}: {part['name']}")
+            download(assets[part["name"]]["browser_download_url"], work / part["name"],
+                     part["size"], part["sha256"], done, grand_total)
+            done += part["size"]
+        report("Dang ghep cac phan thanh ZIP...")
         with archive.open("wb") as joined:
-            for index, part in enumerate(parts, 1):
-                status.set(f"Dang tai phan {index}/{len(parts)}...")
-                window.update_idletasks()
-                temp = work / part["name"]
-                download(assets[part["name"]]["browser_download_url"], temp, part["size"], part["sha256"])
-                with temp.open("rb") as source:
+            for part in parts:
+                with (work / part["name"]).open("rb") as source:
                     shutil.copyfileobj(source, joined, CHUNK)
-                temp.unlink()
     else:
         if "portable_update.zip" not in assets:
             raise RuntimeError("Release thieu portable_update.zip")
         download(assets["portable_update.zip"]["browser_download_url"], archive)
+    report("Dang kiem tra SHA256 ZIP...")
     if sha256(archive) != manifest.get("zip_sha256"):
+        archive.unlink(missing_ok=True)
         raise RuntimeError("SHA256 ZIP khong khop")
     return archive
+
 
 def safe_extract(archive, stage):
     with zipfile.ZipFile(archive) as z:
@@ -126,8 +186,8 @@ def safe_extract(archive, stage):
         raise RuntimeError("Goi cap nhat thieu KhiemYoutube.exe")
 
 def apply():
-    status.set("Dang kiem tra GitHub Release...")
-    window.update_idletasks()
+    report("Dang kiem tra GitHub Release...")
+    pass
     release = fetch_json(API)
     assets = {x["name"]: x for x in release.get("assets", [])}
     if "portable_manifest.json" not in assets:
@@ -138,20 +198,21 @@ def apply():
     version = manifest["version"]
     current = ROOT / "portable_version.txt"
     if current.is_file() and current.read_text(encoding="utf-8").strip() == version:
-        messagebox.showinfo("Khiem Youtube", "Phan mem da la phien ban moi nhat.")
+        ui_dialog("info", "Khiem Youtube", "Phan mem da la phien ban moi nhat.")
         return
-    if not messagebox.askyesno("Cap nhat Khiem Youtube", f"Cai phien ban {version}?\nHay dong KhiemYoutube.exe truoc khi tiep tuc.\nCan du dung luong trong de tai va giai nen."):
+    if not ui_dialog("ask", "Cap nhat Khiem Youtube", f"Cai phien ban {version}?\nHay dong KhiemYoutube.exe truoc khi tiep tuc.\nCan du dung luong trong de tai va giai nen."):
         return
-    work = Path(tempfile.mkdtemp(prefix="khiem_update_"))
+    work = Path(tempfile.gettempdir()) / "khiem_youtube_updates" / version
+    work.mkdir(parents=True, exist_ok=True)
     try:
         archive = get_archive(release, manifest, assets, work)
-        status.set("Dang giai nen va kiem tra...")
-        window.update_idletasks()
+        report("Dang giai nen va kiem tra...")
+        pass
         stage = work / "stage"
-        stage.mkdir()
+        stage.mkdir(exist_ok=True)
         safe_extract(archive, stage)
-        status.set("Dang doi KhiemYoutube.exe dong...")
-        window.update_idletasks()
+        report("Dang doi KhiemYoutube.exe dong...")
+        pass
         for _ in range(60):
             try:
                 with (ROOT / "KhiemYoutube.exe").open("ab"):
@@ -188,27 +249,99 @@ def apply():
                 elif destination.exists():
                     destination.unlink()
             raise
-        status.set("Cap nhat thanh cong: " + version)
-        messagebox.showinfo("Khiem Youtube", "Cap nhat thanh cong. Mo lai KhiemYoutube.exe.")
+        report("Cap nhat thanh cong: " + version)
+        ui_dialog("info", "Khiem Youtube", "Cap nhat thanh cong. Mo lai KhiemYoutube.exe.")
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        # Keep verified parts for resume after interruption; remove extracted stage.
+        shutil.rmtree(work / "stage", ignore_errors=True)
+
+def human(n):
+    return f"{n / (1024 * 1024):,.1f} MB"
 
 window = tk.Tk()
 window.title("KHIEM YOUTUBE | CAP NHAT PORTABLE")
-window.geometry("540x210")
-ttk.Label(window, text="CAP NHAT PORTABLE TU GITHUB", font=("Segoe UI", 14, "bold")).pack(pady=(20, 8))
+window.geometry("700x430")
+window.minsize(640, 400)
+frame = ttk.Frame(window, padding=20)
+frame.pack(fill="both", expand=True)
+ttk.Label(frame, text="KHIEM YOUTUBE | GITHUB UPDATER", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 12))
 status = tk.StringVar(value="San sang kiem tra phien ban moi.")
-ttk.Label(window, textvariable=status, wraplength=500).pack(pady=6)
-def start():
-    button.configure(state="disabled")
+ttk.Label(frame, textvariable=status, wraplength=650).pack(anchor="w", pady=(0, 12))
+ttk.Label(frame, text="TIEN TRINH TONG", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+overall = ttk.Progressbar(frame, maximum=100)
+overall.pack(fill="x", pady=(5, 4))
+overall_text = tk.StringVar(value="0%")
+ttk.Label(frame, textvariable=overall_text).pack(anchor="w", pady=(0, 12))
+ttk.Label(frame, text="FILE DANG TAI", font=("Segoe UI", 10, "bold")).pack(anchor="w")
+filename_text = tk.StringVar(value="Chua tai")
+ttk.Label(frame, textvariable=filename_text).pack(anchor="w")
+filebar = ttk.Progressbar(frame, maximum=100)
+filebar.pack(fill="x", pady=(5, 4))
+file_text = tk.StringVar(value="0 MB / 0 MB")
+ttk.Label(frame, textvariable=file_text).pack(anchor="w")
+speed_text = tk.StringVar(value="Toc do: -- MB/s     Con lai: --")
+ttk.Label(frame, textvariable=speed_text).pack(anchor="w", pady=(8, 12))
+detail_text = tk.StringVar(value="Trang thai: cho kiem tra")
+ttk.Label(frame, textvariable=detail_text).pack(anchor="w", pady=(0, 10))
+running = False
+
+def worker():
     try:
         apply()
     except Exception as exc:
-        status.set("Cap nhat that bai")
-        messagebox.showerror("Cap nhat", str(exc))
+        report("Cap nhat that bai")
+        ui_dialog("error", "Cap nhat", str(exc))
     finally:
-        button.configure(state="normal")
-button = ttk.Button(window, text="KIEM TRA VA CAP NHAT", command=start)
-button.pack(pady=12)
+        EVENTS.put(("finished",))
+
+def start():
+    global running
+    if running:
+        return
+    running = True
+    button.configure(state="disabled")
+    threading.Thread(target=worker, daemon=True).start()
+
+button = ttk.Button(frame, text="KIEM TRA VA CAP NHAT", command=start)
+button.pack(anchor="w", pady=8)
+
+def pump():
+    global running
+    for _ in range(150):
+        try:
+            item = EVENTS.get_nowait()
+        except queue.Empty:
+            break
+        kind = item[0]
+        if kind == "status":
+            status.set(item[1])
+            detail_text.set("Trang thai: " + item[1])
+        elif kind == "progress":
+            _, filename, received, size, total_received, total, speed = item
+            filename_text.set(filename)
+            filebar["value"] = 100 * received / size if size else 0
+            overall["value"] = 100 * total_received / total if total else 0
+            overall_text.set(f"{overall['value']:.1f}%  |  {human(total_received)} / {human(total)}")
+            file_text.set(f"{human(received)} / {human(size)}")
+            if speed > 0:
+                eta = max(0, total - total_received) / speed
+                speed_text.set(f"Toc do: {human(speed)}/s     Con lai uoc tinh: {int(eta // 60)} phut {int(eta % 60)} giay")
+        elif kind == "dialog":
+            _, dialog_kind, title, message, reply = item
+            if dialog_kind == "ask":
+                result = messagebox.askyesno(title, message)
+            elif dialog_kind == "error":
+                messagebox.showerror(title, message)
+                result = None
+            else:
+                messagebox.showinfo(title, message)
+                result = None
+            reply.put(result)
+        elif kind == "finished":
+            running = False
+            button.configure(state="normal")
+    window.after(100, pump)
+
+window.after(100, pump)
 if __name__ == "__main__":
     window.mainloop()
