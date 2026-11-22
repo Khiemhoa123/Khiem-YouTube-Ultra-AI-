@@ -191,8 +191,10 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
     # never assumed to represent the same person.
     SAME = 0.80
     MARGIN = 0.09
-    MAX_WINDOWS = 8
-    WINDOW = 90.0
+    # Scan up to 24 short windows, sampling across the entire video.
+    # Long interviews must not be limited to their first few minutes.
+    MAX_WINDOWS = 24
+    WINDOW = 75.0
     results = {}
     with tempfile.TemporaryDirectory(prefix="khiem_voice_v8_") as temp_dir:
         temp = Path(temp_dir)
@@ -200,12 +202,20 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         window_files = []
         # Avoid the opening sting and audience applause on long interviews.
         start_at = 60.0 if duration > 240.0 else (25.0 if duration > 85.0 else 0.0)
-        for part in range(MAX_WINDOWS):
+        available = max(0.0, duration - start_at)
+        # Cover the whole recording without diarizing all of it.
+        import math
+        scan_count = min(MAX_WINDOWS, max(1, math.ceil(available / WINDOW)))
+        last_start = max(start_at, duration - WINDOW)
+        starts = ([start_at] if scan_count == 1 else
+                  [start_at + (last_start - start_at) * i / (scan_count - 1)
+                   for i in range(scan_count)])
+        for part, start_at in enumerate(starts):
             length = min(WINDOW, duration - start_at)
             if length < 30:
                 break
             wav = temp / f"window_{part:02}.wav"
-            log(f"V8.1: quét đoạn {part+1}/{MAX_WINDOWS}, "
+            log(f"V9.1: quét đoạn {part+1}/{len(starts)}, "
                 f"video {start_at:.0f}s đến {start_at+length:.0f}s.")
             _run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start_at:.3f}",
                   "-i", str(video), "-t", f"{length:.3f}", "-vn",
@@ -280,17 +290,16 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 f"Speaker {i+1:02}: {sum(b-a for _,a,b in c['cuts']):.1f}s"
                 for i, c in enumerate(clusters)))
             ready = [c for c in clusters if sum(b-a for _,a,b in c["cuts"]) >= target_seconds]
-            # At least two windows are analyzed when possible, so a short
-            # intro speaker does not become the only output.
-            if len(ready) >= 2 and part >= 1:
-                log("Đủ hai giọng đã xác minh. Dừng quét sớm.")
+            # Do not assume two speakers. Count is determined by the clip.
+            # Scan further when a speaker is still short of the target.
+            if len(ready) >= 2 and part >= 3:
+                log("Đã có ít nhất hai Speaker đủ thời lượng, kết thúc quét sớm.")
                 break
-            start_at += length
 
         exported = 0
         for c in clusters:
             ordered = sorted(c["cuts"], key=lambda z: (z[0], z[1]))
-            if sum(b-a for _, a, b in ordered) < 30.0:
+            if sum(b-a for _, a, b in ordered) < target_seconds:
                 log("BỎ QUA Speaker: dưới 30 giây đã xác minh.")
                 continue
             selected = []
@@ -304,7 +313,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 if remaining < 0.05:
                     break
             total = sum(take for _, _, take in selected)
-            if total < 29.95:
+            if total < target_seconds - 0.05:
                 log(f"BỎ QUA Speaker: chỉ {total:.1f}s hợp lệ.")
                 continue
             # Use individual input files for scanned windows, and trim at
@@ -344,8 +353,10 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
                 f"{len(selected)} lượt nói đã xác minh.")
     if not results:
         raise ValueError(
-            "Không có Speaker đủ 30 giây vượt qua kiểm tra giọng nói V8. "
-            "Không xuất MP3 sai. Hãy dùng video dài hơn hoặc nguồn sạch hơn.")
-    log("V9 Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
+            "Đã quét nhiều vị trí trong video nhưng không thu đủ "
+            f"{target_seconds} giây giọng được xác minh cho một Speaker. "
+            "Đây là thiếu dữ liệu ĐẠT NGƯỠNG AI, không khẳng định video "
+            "thiếu lời nói. Hãy xem nhật ký số giây của từng Speaker.")
+    log("V9.1 Stability hoàn tất. Phát hiện chồng giọng chỉ dựa trên diarization; "
         "không bảo đảm loại bỏ mọi tiếng cười hoặc giọng chen ngang.")
     return results
