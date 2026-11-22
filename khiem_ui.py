@@ -190,12 +190,27 @@ class KhiemYoutube:
         ttk.Spinbox(tab, from_=30, to=45, textvariable=self.ia_seconds, width=8).grid(row=5, column=1, sticky="w", padx=8)
         self.ia_button = ttk.Button(tab, text="PHÂN TÍCH VÀ NGHE THỬ", command=self.ia_start)
         self.ia_button.grid(row=6, column=0, columnspan=3, sticky="ew", pady=12)
+        # V7: always-visible compact live timeline, above the preview list.
+        self.ia_live_phase = tk.StringVar(value="Sẵn sàng phân tích")
+        self.ia_live_window = tk.StringVar(value="Chưa quét video")
+        self.ia_live_timer = tk.StringVar(value="00:00:00")
+        live = ttk.LabelFrame(tab, text="TIMELINE XỬ LÝ TRỰC TIẾP", padding=8)
+        live.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        live.columnconfigure(0, weight=1)
+        ttk.Label(live, textvariable=self.ia_live_phase,
+                  font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(live, textvariable=self.ia_live_timer,
+                  font=("Consolas", 10, "bold")).grid(row=0, column=1, sticky="e")
+        self.ia_live_bar = ttk.Progressbar(live, mode="indeterminate")
+        self.ia_live_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        ttk.Label(live, textvariable=self.ia_live_window,
+                  foreground=COLORS["muted"]).grid(row=2, column=0, columnspan=2, sticky="w")
         # V6: review MP3 previews before copying any selected voice to output.
         self.ia_previews = {}
         self.ia_preview_dir = None
         self.ia_player = None
         review = ttk.LabelFrame(tab, text="NGHE THỬ VÀ CHỌN GIỌNG XUẤT", padding=8)
-        review.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        review.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         review.columnconfigure(0, weight=1)
         self.ia_voice_list = ttk.Treeview(review, columns=("length", "file"),
                                           show="headings", height=4, selectmode="extended")
@@ -226,7 +241,7 @@ class KhiemYoutube:
         self.ia_file_count = 0
         self.ia_stage_index = -1
         summary = ttk.LabelFrame(tab, text="TIẾN TRÌNH XỬ LÝ", padding=10)
-        summary.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        summary.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         summary.columnconfigure(0, weight=1)
         ttk.Label(summary, textvariable=self.ia_status, font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(summary, text="Thời gian:", foreground=COLORS["muted"]).grid(row=0, column=1, padx=(16, 4))
@@ -249,7 +264,7 @@ class KhiemYoutube:
         ttk.Label(summary, text="Số người nói:").grid(row=6, column=0, sticky="w", pady=(7, 0))
         ttk.Label(summary, textvariable=self.ia_speakers).grid(row=6, column=1, columnspan=4, sticky="w", pady=(7, 0))
         details = ttk.LabelFrame(tab, text="NHẬT KÝ CHI TIẾT", padding=6)
-        details.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        details.grid(row=10, column=0, columnspan=3, sticky="nsew")
         details.rowconfigure(0, weight=1)
         details.columnconfigure(0, weight=1)
         self.ia_log = tk.Text(details, height=7, wrap="word", font=("Consolas", 9), spacing1=3)
@@ -257,8 +272,8 @@ class KhiemYoutube:
         ia_scroll = ttk.Scrollbar(details, orient="vertical", command=self.ia_log.yview)
         ia_scroll.grid(row=0, column=1, sticky="ns")
         self.ia_log.configure(yscrollcommand=ia_scroll.set)
-        tab.rowconfigure(9, weight=1)
-        ttk.Label(tab, text="Dưới 30 giây: báo lỗi và bỏ qua. Các đoạn hai người nói chồng nhau không được sử dụng.", wraplength=850).grid(row=10, column=0, columnspan=3, sticky="w", pady=8)
+        tab.rowconfigure(10, weight=1)
+        ttk.Label(tab, text="Dưới 30 giây: báo lỗi và bỏ qua. Các đoạn hai người nói chồng nhau không được sử dụng.", wraplength=850).grid(row=11, column=0, columnspan=3, sticky="w", pady=8)
 
     def ia_choose_video(self):
         value = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.mkv *.avi *.webm"), ("All files", "*.*")])
@@ -307,6 +322,10 @@ class KhiemYoutube:
         self.ia_stage_index = -1
         self.ia_render_steps()
         self.ia_progress.start(12)
+        self.ia_live_phase.set("Đang chuẩn bị mô hình AI...")
+        self.ia_live_window.set("Chưa quét video")
+        self.ia_live_timer.set("00:00:00")
+        self.ia_live_bar.start(12)
         self.ia_tick()
         def report(message):
             self.root.after(0, lambda msg=str(message): self.ia_on_message(msg))
@@ -400,7 +419,9 @@ class KhiemYoutube:
         if not self.ia_running:
             return
         seconds = int(max(0, time.monotonic() - self.ia_started))
-        self.ia_elapsed.set(f"Đã chạy: {seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}")
+        clock = f"{seconds // 3600:02}:{seconds // 60 % 60:02}:{seconds % 60:02}"
+        self.ia_elapsed.set("Đã chạy: " + clock)
+        self.ia_live_timer.set(clock)
         self.root.after(1000, self.ia_tick)
 
     def ia_render_steps(self):
@@ -416,24 +437,41 @@ class KhiemYoutube:
         # Separate each log event onto its own line, not a continuous string.
         self.ia_log.insert("end", message + "\n")
         self.ia_log.see("end")
+        # The backend reports actual scan windows and model status.
+        if "quét đoạn" in message or "quét cửa sổ" in message:
+            self.ia_live_window.set(message)
+            self.ia_live_phase.set("AI đang phân tích giọng nói")
+        elif "AI xong đoạn" in message:
+            self.ia_live_window.set(message)
+            self.ia_live_phase.set("Đang kiểm tra các giọng đủ 30 giây")
+        elif "Đã xuất" in message and "Speaker_" in message:
+            self.ia_live_window.set(message)
+            self.ia_live_phase.set("Đang chuẩn bị bản nghe thử")
+        elif "Đang tải mô hình" in message:
+            self.ia_live_phase.set("Đang nạp mô hình AI")
+        elif "Video dài" in message:
+            self.ia_live_window.set(message)
         stage = None
         if "Đang tải mô hình" in message or "Đã dùng lại mô hình" in message:
             stage = 0
-        elif "Đang chuẩn bị audio" in message:
+        elif "V5: quét đoạn" in message:
             stage = 1
-        elif "đang xác định" in message or "Đã nhận diện" in message:
+        elif "AI xong đoạn" in message:
             stage = 2
-        elif "Đang xuất" in message or "Bật lọc" in message or message.startswith("Speaker "):
+        elif "Đã xuất" in message or "Đang xuất" in message:
             stage = 3
         if stage is not None:
             self.ia_stage_index = max(self.ia_stage_index, stage)
             self.ia_status.set(self.ia_steps[self.ia_stage_index][3:])
             self.ia_render_steps()
-        if "Đã nhận diện" in message:
+        if "AI xong đoạn" in message:
             self.ia_speakers.set(message)
-        if message.startswith("Speaker ") and " -> " in message:
+        if "Đã xuất Speaker_" in message:
             self.ia_file_count += 1
             self.ia_files.set(str(self.ia_file_count))
+        if message.startswith("ĐÃ PHÂN TÍCH:"):
+            self.ia_live_phase.set("Phân tích xong. Chọn giọng để nghe thử")
+            self.ia_live_window.set(message)
         if message.startswith("HOÀN THÀNH"):
             self.ia_status.set("Hoàn thành")
             self.ia_stage_index = len(self.ia_steps)
@@ -446,6 +484,7 @@ class KhiemYoutube:
     def ia_finish(self):
         self.ia_running = False
         self.ia_progress.stop()
+        self.ia_live_bar.stop()
         self.ia_button.configure(state="normal")
 
     def load_settings(self):
