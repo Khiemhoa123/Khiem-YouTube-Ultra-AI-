@@ -271,11 +271,19 @@ def insert_interview_cutaways(parts, intro, c, log):
     intro_start = float(intro.get("source_start", 0))
     intro_end = intro_start + float(intro.get("duration", 0))
     reserved = {intro_source: [(intro_start, intro_end)]}
-    number_parts = [p for p in parts if re.search(r"\bnumber\b", str(p.get("title", p.get("name", ""))), re.I)]
-    # If the renderer doesn't carry titles, use every section except Opening/Hook/Ending.
+    # app.py only provides number and voice, not a section title.
+    # Derive the section from the actual voice filename to avoid placing
+    # interview cutaways in Opening, Hook, or Ending.
+    def section_label(part):
+        return (str(part.get("title") or part.get("name") or "") + " " +
+                Path(str(part.get("voice") or "")).stem).lower()
+    number_parts = [p for p in parts
+                    if re.search(r"\bnumber\s*\d+\b", section_label(p), re.I)
+                    and not re.search(r"opening|ending|hook", section_label(p), re.I)]
     if not number_parts:
-        number_parts = [p for p in parts if not re.search(
-            r"opening|ending|hook", str(p.get("title", p.get("name", ""))), re.I)]
+        number_parts = [p for p in parts
+                        if not re.search(r"opening|ending|hook", section_label(p), re.I)
+                        and re.search(r"\bnumber\b", section_label(p), re.I)]
     if not number_parts:
         raise RuntimeError("Khong tim thay Number de chen Interview.")
 
