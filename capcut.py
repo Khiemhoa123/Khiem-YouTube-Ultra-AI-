@@ -91,8 +91,13 @@ def export(c,parts,log):
   begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
   clips=p['clips']
   for i,clip in enumerate(clips):
-   start=begin if i==0 else round((clip['start']+duration if intro else clip['start'])*1e6)
-   stop=end if i==len(clips)-1 else round((clips[i+1]['start']+duration if intro else clips[i+1]['start'])*1e6)
+   start=round((float(clip['start'])+(duration if intro else 0))*1e6)
+   # Use each clip's actual frame duration. Interview cutaways must be exactly 2s.
+   clip_seconds=float(clip.get('duration',0))
+   if clip.get('interview_cutaway'):
+    clip_seconds=2.0
+   stop=start+round(clip_seconds*1e6)
+   if stop>end+2: raise ValueError('Canh vuot qua thoi luong Number: '+str(p.get('number','')))
    add(clip['type'],clip['source'],start,stop,round(clip['source_start']*1e6),clip['effect'])
 
  # Subtitles are optional and created in CapCut Pro after opening the draft.
