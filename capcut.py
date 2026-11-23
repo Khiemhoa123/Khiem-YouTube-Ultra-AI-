@@ -66,29 +66,16 @@ def export(c,parts,log):
      pt=copy.deepcopy(zoom_template['keyframe_list'][0]); pt.update(id=uid(),time_offset=round(frac*length),values=[a+(b-a)*(1-math.cos(math.pi*frac))/2]); key['keyframe_list'].append(pt)
     s['common_keyframes']=[key]
   tracks['audio' if kind=='audio' else 'video']['segments'].append(s)
- intro=c.get('_interview_intro')
+ # Interview is only a silent two-second cutaway inside selected sections.
+ # Do not prepend interview footage, add interview audio, or shift the timeline.
  elapsed=0.
- if intro:
-  us=round(float(intro['source_start'])*1e6)
-  end=round(float(intro['duration'])*1e6)
-  add('video',intro['source'],0,end,us,'Tĩnh')
-  # CapCut music material needs an audio file, not an MP4 path.
-  audio_dir=Path(c['out'])/'_interview_audio'
-  audio_dir.mkdir(parents=True,exist_ok=True)
-  audio_path=audio_dir/(Path(intro['source']).stem+'_'+str(round(float(intro['source_start'])*1000))+'_'+str(round(float(intro['duration'])*1000))+'.wav')
-  if not audio_path.is_file() or audio_path.stat().st_size<1024:
-   tmp_audio=audio_path.with_suffix('.tmp.wav')
-   cmd=['ffmpeg','-hide_banner','-loglevel','error','-y','-ss',str(intro['source_start']),'-i',str(intro['source']),'-t',str(intro['duration']),'-vn','-ar','48000','-ac','2','-c:a','pcm_s16le',str(tmp_audio)]
-   subprocess.run(cmd,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),capture_output=True)
-   os.replace(tmp_audio,audio_path)
-  add('audio',str(audio_path),0,end,0)
-  log('CapCut intro: video + original audio on separate editable tracks')
-  elapsed=float(intro['duration'])
  for p in parts:
   begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
   clips=p['clips']
-  for i,s in enumerate(clips):
-   start=begin if i==0 else round((s['start']+float(intro['duration']) if intro else s['start'])*1e6); stop=end if i==len(clips)-1 else round((clips[i+1]['start']+float(intro['duration']) if intro else clips[i+1]['start'])*1e6); add(s['type'],s['source'],start,stop,round(s['source_start']*1e6),s['effect'])
+  for i,clip in enumerate(clips):
+   start=begin if i==0 else round(clip['start']*1e6)
+   stop=end if i==len(clips)-1 else round(clips[i+1]['start']*1e6)
+   add(clip['type'],clip['source'],start,stop,round(clip['source_start']*1e6),clip['effect'])
 
  # Subtitles are optional and created in CapCut Pro after opening the draft.
  # Never import stale SRT files from previous exports.
@@ -105,7 +92,6 @@ def export(c,parts,log):
     left=prev['target_timerange'];right=cur['target_timerange']
     if left['start']+left['duration']!=right['start']:continue
     if min(left['duration'],right['duration'])<1200000:continue
-    if intro and right['start']<=round(float(intro['duration'])*1e6):continue
     # Limit effects to every third eligible boundary, avoiding visual overload.
     if added%3!=0:
      added+=1;continue
