@@ -88,17 +88,35 @@ def export(c,parts,log):
   elapsed=duration
   log(f'CapCut: Interview mo dau {duration:.1f}s co am thanh goc, truoc Opening.')
  for p in parts:
-  begin=round(elapsed*1e6); elapsed+=p['duration']; end=round(elapsed*1e6); add('audio',p['voice'],begin,end,0)
+  # app.py timestamps are global frame positions, whereas the voice durations
+  # are exact seconds. Align every section locally to prevent cumulative drift.
   clips=p['clips']
-  for i,clip in enumerate(clips):
-   start=round((float(clip['start'])+(duration if intro else 0))*1e6)
-   # Use each clip's actual frame duration. Interview cutaways must be exactly 2s.
-   clip_seconds=float(clip.get('duration',0))
-   if clip.get('interview_cutaway'):
-    clip_seconds=2.0
+  begin=round(elapsed*1e6)
+  elapsed+=float(p['duration'])
+  end=round(elapsed*1e6)
+  add('audio',p['voice'],begin,end,0)
+  if not clips:
+   continue
+  base=min(float(x['start']) for x in clips)
+  clipped_frames=0
+  for clip in clips:
+   relative=max(0.0,float(clip['start'])-base)
+   start=begin+round(relative*1e6)
+   clip_seconds=2.0 if clip.get('interview_cutaway') else float(clip.get('duration',0))
    stop=start+round(clip_seconds*1e6)
-   if stop>end+2: raise ValueError('Canh vuot qua thoi luong Number: '+str(p.get('number','')))
-   add(clip['type'],clip['source'],start,stop,round(clip['source_start']*1e6),clip['effect'])
+   # Frame-rounded video can exceed the voice by less than a frame.
+   # Trim only the excess; never change the voice or insert overlap.
+   if start>=end:
+    clipped_frames+=1
+    continue
+   if stop>end:
+    clipped_frames+=1
+    stop=end
+   if stop>start:
+    add(clip['type'],clip['source'],start,stop,
+        round(float(clip['source_start'])*1e6),clip['effect'])
+  if clipped_frames:
+   log(f"CapCut phan {p.get('number','')}: can chinh {clipped_frames} canh o cuoi phan theo voice, khong doi voice.")
 
  # Subtitles are optional and created in CapCut Pro after opening the draft.
  # Never import stale SRT files from previous exports.
