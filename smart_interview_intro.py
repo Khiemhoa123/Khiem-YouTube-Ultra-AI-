@@ -36,8 +36,8 @@ def _script_text(folder):
 
 def _sample_rows(path, duration, model, log):
     from whisper_audio_fix_v11 import transcribe_media
-    # Bounded sampling: at most three 25-second windows per source.
-    offsets = sorted(set(round(max(0, duration-25)*f, 2) for f in (0.12, 0.48, 0.78)))
+    # Sample the beginning, middle, and end to avoid missing spoken passages.
+    offsets = sorted(set(round(max(0, duration-25)*f, 2) for f in (0.0, 0.25, 0.5, 0.75, 1.0)))
     rows = []
     from types import SimpleNamespace
     with tempfile.TemporaryDirectory() as td:
@@ -94,6 +94,7 @@ def choose_intro(c, log):
             log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
             rows = _sample_rows(path, duration, model, log)
             sampled[str(path)] = rows
+            log(f"WHISPER: {path.name}: {len(rows)} doan nhan dien; mau: "+ " | ".join(x.text.strip()[:75] for x in rows[:3]))
             log(f"INTERVIEW: {len(rows)} đoạn mẫu.")
             # Whisper often omits punctuation. Use natural pauses as additional
             # sentence boundaries and never span an unsampled audio gap.
@@ -127,6 +128,32 @@ def choose_intro(c, log):
                     fallback.append(item)
         except Exception as exc:
             log("Không phân tích được " + path.name + ": " + str(exc))
+    # When Whisper omits punctuation and pauses, its segment boundaries are
+    # still useful. Select a complete group of speech segments rather than
+    # an arbitrary time offset; reject samples with no recognized words.
+    if not candidates:
+        for path, rows in sampled.items():
+            rows = sorted(rows, key=lambda x: (x.start, x.end))
+            for i, first in enumerate(rows):
+                for j in range(i, min(len(rows), i + 25)):
+                    last = rows[j]
+                    if j > i and last.start - rows[j-1].end > 1.5:
+                        break
+                    dur = last.end - first.start
+                    if dur > max_seconds:
+                        break
+                    if dur < min(6.0, max_seconds):
+                        continue
+                    phrase = " ".join(x.text.strip() for x in rows[i:j+1])
+                    if len(phrase.split()) < 10:
+                        continue
+                    # Prefer end punctuation or a natural pause, but don't
+                    # require either: Whisper punctuation is not reliable.
+                    score = _similarity(script, phrase)
+                    score += 0.04 if last.text.strip().endswith((".", "?", "!")) else 0
+                    score += min(dur, 25) / 1000
+                    fallback.append((score, path, float(first.start), float(dur), phrase))
+        log(f"INTERVIEW: {len(fallback)} doan loi noi du phong tu Whisper.")
     if candidates:
         candidates.sort(reverse=True)
         best = candidates[0]
@@ -148,8 +175,9 @@ def choose_intro(c, log):
                 'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
     # Do not substitute an arbitrary audio segment: it can end mid-sentence.
     # Fail explicitly rather than create a misleading, abruptly cut interview.
+    log('INTERVIEW: Khong co doan loi noi phu hop. Kiem tra log WHISPER va chat luong am thanh nguon.')
     raise RuntimeError(
-        'Khong tim duoc doan hoi thoai tron ven trong gioi han thoi luong. '
+        'Whisper khong nhan dien du loi noi de chon interview mo dau. '
         'Hay them video Interview co loi noi ro rang hoac kiem tra Whisper.')
     log('INTERVIEW: Khong co video hop le co ca hinh va am thanh trong 5 file dau.')
     return None
