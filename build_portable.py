@@ -71,7 +71,15 @@ def main():
         if importlib.util.find_spec(package) is None:
             raise RuntimeError("Thiếu thư viện " + package + ". Cài vào đúng Python đang build.")
     import torch
-    say("PyTorch: " + torch.__version__ + " | CUDA: " + str(torch.cuda.is_available()))
+    say("PyTorch: " + torch.__version__ + " | CUDA runtime: " + str(torch.version.cuda) + " | CUDA available: " + str(torch.cuda.is_available()))
+    architectures = torch.cuda.get_arch_list() if torch.version.cuda else []
+    say("PyTorch GPU architectures: " + ", ".join(architectures))
+    if "sm_75" not in architectures or "sm_120" not in architectures:
+        raise RuntimeError(
+            "Ban build dung chung GTX 1650 va RTX 5060 can PyTorch CUDA ho tro ca sm_75 va sm_120. "
+            "Ban hien tai: " + str(torch.__version__) + "; architectures: " + str(architectures) +
+            ". Hay tao moi truong build rieng voi PyTorch CUDA 12.8 (cu128) hoac ban tuong thich."
+        )
     if tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2]) < (2, 6):
         raise RuntimeError("PyTorch phải từ 2.6 để đọc CLIP pytorch_model.bin an toàn.")
     models = find_models()
