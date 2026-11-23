@@ -1999,8 +1999,8 @@ class KhiemYoutube:
             messagebox.showerror("Cập nhật", "Không tìm thấy khiem_auto_update.py trong thư mục phần mềm.")
             return
         try:
-            subprocess.Popen([sys.executable, str(updater)], cwd=str(updater.parent))
-            self.log("Đã mở cửa sổ cập nhật GitHub. Không cần xác nhận thêm tại đây.")
+            subprocess.Popen([sys.executable, str(updater), "--one-click"], cwd=str(updater.parent))
+            self.log("Đang tự kiểm tra GitHub và chuẩn bị cập nhật mã nguồn; xác nhận sao lưu khi được hỏi.")
         except OSError as exc:
             messagebox.showerror("Cập nhật", str(exc))
 
