@@ -238,30 +238,37 @@ def insert_interview_cutaways(parts, intro, c, log):
         return result
 
     def splice(clips, t, src, src_t, number):
-        for index, old in enumerate(clips):
-            left = int(round((t - float(old["start"])) * fps))
-            total = int(old["frames"])
-            right = total - left - frames2
-            if left < 0 or right < 0:
+        """Replace exactly two seconds of consecutive still images, keeping timing."""
+        end = t + 2.0
+        result = []
+        inserted_here = False
+        for old in clips:
+            a = float(old["start"])
+            b = a + float(old["frames"]) / fps
+            if b <= t + 1e-5 or a >= end - 1e-5:
+                result.append(old)
                 continue
-            if t + 2 > float(old["start"]) + total / fps + .001:
-                continue
-            result = []
-            if left:
+            if old["type"] != "image":
+                return None
+            if a < t - 1e-5:
                 before = copy.deepcopy(old)
-                before["frames"], before["duration"] = left, left / fps
-                result.append(before)
-            result.append(dict(part=number, type="video", source=src,
-                               source_start=src_t, start=t, frames=frames2,
-                               duration=2.0, effect="Tĩnh", interview_cutaway=True))
-            if right:
+                before["frames"] = int(round((t - a) * fps))
+                before["duration"] = before["frames"] / fps
+                if before["frames"]:
+                    result.append(before)
+            if not inserted_here:
+                result.append(dict(part=number, type="video", source=src,
+                                   source_start=src_t, start=t, frames=frames2,
+                                   duration=2.0, effect="Tĩnh", interview_cutaway=True))
+                inserted_here = True
+            if b > end + 1e-5:
                 after = copy.deepcopy(old)
-                after["start"], after["frames"], after["duration"] = t + 2, right, right / fps
-                if after["type"] == "video":
-                    after["source_start"] = float(old["source_start"]) + (left + frames2) / fps
-                result.append(after)
-            return clips[:index] + result + clips[index + 1:]
-        return None
+                after["start"] = end
+                after["frames"] = int(round((b - end) * fps))
+                after["duration"] = after["frames"] / fps
+                if after["frames"]:
+                    result.append(after)
+        return result if inserted_here else None
 
     inserted = 0
     for p in number_parts:
@@ -275,24 +282,33 @@ def insert_interview_cutaways(parts, intro, c, log):
         start = min(float(cl["start"]) for cl in clips)
         finish = start + float(p.get("duration", 0))
         positions = []
-        # Keep at least three seconds of still imagery on either side
-        # of an inserted interview, including across clip boundaries.
         min_gap = 3.0
         video_ranges = [(float(x["start"]), float(x["start"]) + float(x.get("duration", 0)))
                         for x in clips if x.get("type") == "video"]
-        for cl in clips:
-            if cl.get("type") != "image":
+        # Search frame-aligned two-second windows across consecutive images.
+        # Three seconds of still imagery must separate any two video scenes.
+        image_ranges = sorted((float(x["start"]), float(x["start"]) + float(x["frames"]) / fps)
+                              for x in clips if x.get("type") == "image")
+        runs = []
+        for a, b in image_ranges:
+            if runs and a <= runs[-1][1] + 1.0 / fps:
+                runs[-1][1] = max(runs[-1][1], b)
+            else:
+                runs.append([a, b])
+        for a, b in runs:
+            low = max(a, start + min_gap)
+            high = min(b - 2.0, finish - min_gap - 2.0)
+            for vs, ve in video_ranges:
+                if ve <= a and ve + min_gap > low:
+                    low = max(low, ve + min_gap)
+                if vs >= b and vs - min_gap - 2.0 < high:
+                    high = min(high, vs - min_gap - 2.0)
+            if high < low - 1.0 / fps:
                 continue
-            clip_start = float(cl["start"])
-            clip_duration = float(cl.get("duration", 0))
-            # An interview must fit within a still image with >=3s on both sides.
-            if clip_duration < 2.0 + 2.0 * min_gap:
-                continue
-            t = round((clip_start + (clip_duration - 2.0) / 2.0) * fps) / fps
-            if t < start + min_gap or t + 2.0 > finish - min_gap:
-                continue
-            if any(t < video_end + min_gap and t + 2.0 > video_start - min_gap
-                   for video_start, video_end in video_ranges):
+            # A video inside a candidate run is always forbidden.
+            t = round(((low + high) / 2.0) * fps) / fps
+            if any(t < ve + min_gap and t + 2.0 > vs - min_gap
+                   for vs, ve in video_ranges):
                 continue
             positions.append(t)
         # Prefer a location around the middle of the Number to avoid
@@ -301,7 +317,7 @@ def insert_interview_cutaways(parts, intro, c, log):
         positions.sort(key=lambda t: abs((t + 1.0) - midpoint))
         if not positions:
             raise RuntimeError(
-                f"Number {number}: khong co anh tinh du 8 giay va cach video khac it nhat 3 giay. "
+                f"Number {number}: khong co khoang anh lien tuc du 2 giay va cach video khac it nhat 3 giay. "
                 "Hay them anh hoac dieu chinh thoi luong canh.")
         choices = unique_candidates()
         if not choices:
