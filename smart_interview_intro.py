@@ -275,15 +275,24 @@ def insert_interview_cutaways(parts, intro, c, log):
         start = min(float(cl["start"]) for cl in clips)
         finish = start + float(p.get("duration", 0))
         positions = []
+        # Keep at least three seconds of still imagery on either side
+        # of an inserted interview, including across clip boundaries.
+        min_gap = 3.0
+        video_ranges = [(float(x["start"]), float(x["start"]) + float(x.get("duration", 0)))
+                        for x in clips if x.get("type") == "video"]
         for cl in clips:
             if cl.get("type") != "image":
                 continue
             clip_start = float(cl["start"])
             clip_duration = float(cl.get("duration", 0))
-            if clip_duration < 4.0:
+            # An interview must fit within a still image with >=3s on both sides.
+            if clip_duration < 2.0 + 2.0 * min_gap:
                 continue
             t = round((clip_start + (clip_duration - 2.0) / 2.0) * fps) / fps
-            if t < start + 3.0 or t + 2.0 > finish - 3.0:
+            if t < start + min_gap or t + 2.0 > finish - min_gap:
+                continue
+            if any(t < video_end + min_gap and t + 2.0 > video_start - min_gap
+                   for video_start, video_end in video_ranges):
                 continue
             positions.append(t)
         # Prefer a location around the middle of the Number to avoid
@@ -292,7 +301,7 @@ def insert_interview_cutaways(parts, intro, c, log):
         positions.sort(key=lambda t: abs((t + 1.0) - midpoint))
         if not positions:
             raise RuntimeError(
-                f"Number {number}: khong co anh tinh du 4 giay de chen Interview o giua anh. "
+                f"Number {number}: khong co anh tinh du 8 giay va cach video khac it nhat 3 giay. "
                 "Hay them anh hoac dieu chinh thoi luong canh.")
         choices = unique_candidates()
         if not choices:
