@@ -28,13 +28,12 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:VERSION -notmatch '^v[0-9]+\.[0-9]+(\.[0-9]+)?$') { throw "Invalid version" }
           gh release view $env:VERSION --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) { throw "Release already exists" }
           exit 0
-        env:
-          GH_TOKEN: ${{ github.token }}
       - name: Install Python dependencies
         shell: pwsh
         run: |
