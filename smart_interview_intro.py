@@ -71,13 +71,11 @@ def choose_intro(c, log):
         log("WHISPER: Mô hình sẵn sàng.")
     except Exception as exc:
         log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
-    if model is None:
-        log("Bỏ Interview: không có Whisper để xác nhận lời nói.")
-        return None
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
     sampled = {}
     candidates = []
     fallback = []
+    audio_sources = []
     log(f"INTERVIEW: Tìm thấy {len(videos)} video.")
     for index, path in enumerate(sorted(videos)[:5], 1):
         try:
@@ -87,6 +85,10 @@ def choose_intro(c, log):
                 log("Bỏ qua video không có tiếng: " + path.name)
                 continue
             duration = float(info.get("format", {}).get("duration", 0) or 0)
+            if not any(st.get("codec_type") == "video" for st in info["streams"]) or duration < 4:
+                log("Bỏ qua nguồn Interview quá ngắn hoặc thiếu hình: " + path.name)
+                continue
+            audio_sources.append((str(path), duration))
             if model is None:
                 continue
             log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
@@ -136,7 +138,21 @@ def choose_intro(c, log):
         c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[path]]
         log(f'INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {dur:.1f}s | co loi noi, chua xac minh khuon mat.')
         return {'source':path, 'source_start':start, 'duration':dur, 'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
-    log('Bỏ Interview: không tìm được câu chuyện liền mạch, kết thúc trọn câu trong giới hạn thời lượng.')
+    # If Whisper yields no sentence, still use an interview source with an audio stream.
+    # This is a media fallback, not a claim that speech or speaker identity was verified.
+    if audio_sources:
+        path, duration = audio_sources[0]
+        start = min(max(0.0, duration * 0.15), max(0.0, duration - 4.0))
+        clip_duration = min(max_seconds, duration - start)
+        if clip_duration < 2.0:
+            start = 0.0
+            clip_duration = min(max_seconds, duration)
+        c['_interview_sample_rows'] = []
+        log(f"INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {clip_duration:.1f}s. "
+            "Co am thanh goc, chua xac minh loi noi hay danh tinh. Hay kiem tra truoc khi dang.")
+        return {'source':path, 'source_start':start, 'duration':clip_duration,
+                'transcript':'', 'score':0.0, 'selection_mode':'audio_source_fallback'}
+    log('INTERVIEW: Khong co video hop le co ca hinh va am thanh trong 5 file dau.')
     return None
 
 def prepend_mp4(c, intro, log):
@@ -206,7 +222,14 @@ def insert_interview_cutaways(parts, intro, c, log):
                 samples.append(t)
     samples = sorted(set(samples))
     if not samples:
-        raise RuntimeError("Không đủ đoạn video Interview 2 giây ngoài Opening.")
+        # A separate two-second visual can be selected even without Whisper samples.
+        # Prefer footage outside the intro; overlap is permitted only when necessary.
+        for offset in (0.0, length * 0.45, max(0.0, length - 2.1)):
+            if offset + 2 <= length and not any(offset < b + 1 and offset + 2 > a - 1 for a,b in reserved):
+                samples.append(offset)
+        if not samples and length >= 2:
+            samples.append(max(0.0, length - 2.0))
+            log("INTERVIEW CUTAWAY: Thieu canh rieng, su dung lai 2 giay hinh anh tu nguon Interview.")
 
     def splice(clips, t, src_t, number):
         for index, old in enumerate(clips):
@@ -255,8 +278,8 @@ def insert_interview_cutaways(parts, intro, c, log):
         for t in positions:
             available = [x for x in samples if not any(x < b + 1 and x + 2 > a - 1 for a, b in reserved)]
             if not available:
-                log(f"INTERVIEW Number {number}: Thiếu đoạn nguồn không trùng, đã chèn {placed}/{len(positions)}.")
-                break
+                available = samples
+                log(f"INTERVIEW Number {number}: Da het canh khong trung, tai su dung canh Interview.")
             # Prefer a deterministic variety of source positions, never repeat.
             source_t = available[(number + placed * 7) % len(available)]
             updated = splice(clips, t, source_t, number)
