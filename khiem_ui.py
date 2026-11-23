@@ -19,21 +19,23 @@ import app as engine
 # Only intercept these two media tools; leave other subprocesses unchanged.
 import subprocess as _media_subprocess
 _original_media_popen = _media_subprocess.Popen
-def _quiet_media_popen(*args, **kwargs):
-    if os.name == "nt":
-        command = args[0] if args else kwargs.get("args", [])
-        executable = command[0] if isinstance(command, (list, tuple)) and command else command
-        name = Path(str(executable)).name.lower().strip('"')
-        if name in ("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"):
-            kwargs["creationflags"] = kwargs.get("creationflags", 0) | getattr(_media_subprocess, "CREATE_NO_WINDOW", 0)
-            startup = kwargs.get("startupinfo")
-            if startup is None:
-                startup = _media_subprocess.STARTUPINFO()
-                kwargs["startupinfo"] = startup
-            startup.dwFlags |= getattr(_media_subprocess, "STARTF_USESHOWWINDOW", 1)
-            startup.wShowWindow = 0
-    return _original_media_popen(*args, **kwargs)
-_media_subprocess.Popen = _quiet_media_popen
+class _QuietMediaPopen(_original_media_popen):
+    """Keep subprocess.Popen a class so asyncio and PyTorch can subclass it."""
+    def __init__(self, *args, **kwargs):
+        if os.name == "nt":
+            command = args[0] if args else kwargs.get("args", [])
+            executable = command[0] if isinstance(command, (list, tuple)) and command else command
+            name = Path(str(executable)).name.lower().strip('"')
+            if name in ("ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"):
+                kwargs["creationflags"] = kwargs.get("creationflags", 0) | getattr(_media_subprocess, "CREATE_NO_WINDOW", 0)
+                startup = kwargs.get("startupinfo")
+                if startup is None:
+                    startup = _media_subprocess.STARTUPINFO()
+                    kwargs["startupinfo"] = startup
+                startup.dwFlags |= getattr(_media_subprocess, "STARTF_USESHOWWINDOW", 1)
+                startup.wShowWindow = 0
+        super().__init__(*args, **kwargs)
+_media_subprocess.Popen = _QuietMediaPopen
 
 class _CheckCancelled(Exception):
     """User requested a safe stop during media inspection."""
