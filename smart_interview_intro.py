@@ -35,19 +35,50 @@ def _script_text(folder):
     return files[0].read_text(encoding="utf-8-sig", errors="replace")[:6000]
 
 def _sample_rows(path, duration, model, log):
+    """Transcribe independent windows; retain word timings for long Whisper segments."""
     from whisper_audio_fix_v11 import transcribe_media
-    # Sample the beginning, middle, and end to avoid missing spoken passages.
-    offsets = sorted(set(round(max(0, duration-25)*f, 2) for f in (0.0, 0.25, 0.5, 0.75, 1.0)))
-    rows = []
     from types import SimpleNamespace
+    # Nonoverlapping samples avoid duplicate words and false cross-window passages.
+    window = 32.0
+    if duration <= 180:
+        offsets = [float(x) for x in range(0, max(1, int(duration)), 30)]
+    else:
+        offsets = sorted(set(round(max(0, duration-window)*f, 2)
+                             for f in (0.0, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0)))
+    rows = []
     with tempfile.TemporaryDirectory() as td:
+        wav = Path(td) / "sample.wav"
         for offset in offsets:
-            wav = Path(td)/"sample.wav"
-            _run(["ffmpeg","-v","error","-y","-ss",str(offset),"-i",str(path),"-t","25","-vn","-ac","1","-ar","16000",str(wav)])
-            segments, _ = transcribe_media(wav, model=model, vad_filter=True, beam_size=1)
-            for seg in segments:
-                rows.append(SimpleNamespace(start=float(seg.start)+offset,end=float(seg.end)+offset,text=seg.text))
-    return rows
+            remaining = min(window, max(0.0, duration-offset))
+            if remaining < 2:
+                continue
+            try:
+                _run(["ffmpeg","-v","error","-y","-ss",str(offset),
+                      "-i",str(path),"-t",str(remaining),"-vn",
+                      "-ac","1","-ar","16000",str(wav)])
+                segments, _ = transcribe_media(
+                    wav, model=model, vad_filter=False, beam_size=3,
+                    word_timestamps=True, condition_on_previous_text=False)
+                count = 0
+                for seg in segments:
+                    words = getattr(seg, "words", None) or []
+                    if words:
+                        for word in words:
+                            text = str(getattr(word, "word", "") or "").strip()
+                            if text and word.start is not None and word.end is not None:
+                                rows.append(SimpleNamespace(
+                                    start=max(0.0,float(word.start)+offset),
+                                    end=min(duration,float(word.end)+offset),text=text))
+                                count += 1
+                    elif str(seg.text).strip():
+                        rows.append(SimpleNamespace(
+                            start=float(seg.start)+offset,
+                            end=float(seg.end)+offset,text=str(seg.text).strip()))
+                        count += 1
+                log(f"WHISPER: {Path(path).name} tai {offset:.1f}s: {count} tu/doan.")
+            except Exception as exc:
+                log(f"WHISPER: Loi mau {Path(path).name} tai {offset:.1f}s: {exc}")
+    return sorted(rows, key=lambda x: (x.start,x.end))
 
 def choose_intro(c, log):
     """Return optional intro dict. Never silently select a low-confidence passage."""
@@ -102,23 +133,23 @@ def choose_intro(c, log):
             for i, first in enumerate(rows):
                 if i:
                     prev = rows[i-1]
-                    if first.start - prev.end < 0.35 and not prev.text.strip().endswith((".", "?", "!")):
+                    if first.start - prev.end < 0.25 and not prev.text.strip().endswith((".", "?", "!")):
                         continue
-                for j in range(i, min(len(rows), i + 35)):
+                for j in range(i, min(len(rows), i + 130)):
                     last = rows[j]
                     if j > i and last.start - rows[j-1].end > 1.5:
                         break
                     dur = float(last.end - first.start)
                     if dur > max_seconds:
                         break
-                    if dur < min(8.0, max_seconds):
+                    if dur < min(6.0, max_seconds):
                         continue
                     next_pause = rows[j+1].start-last.end if j+1 < len(rows) else 0
                     has_ending = last.text.strip().endswith((".", "?", "!"))
                     if not has_ending and next_pause < 0.4:
                         continue
                     phrase = " ".join(x.text.strip() for x in rows[i:j+1])
-                    if len(phrase.split()) < 12:
+                    if len(phrase.split()) < 8:
                         continue
                     score = _similarity(script, phrase)
                     score += 0.05 if has_ending else 0.025
@@ -135,7 +166,7 @@ def choose_intro(c, log):
         for path, rows in sampled.items():
             rows = sorted(rows, key=lambda x: (x.start, x.end))
             for i, first in enumerate(rows):
-                for j in range(i, min(len(rows), i + 25)):
+                for j in range(i, min(len(rows), i + 130)):
                     last = rows[j]
                     if j > i and last.start - rows[j-1].end > 1.5:
                         break
