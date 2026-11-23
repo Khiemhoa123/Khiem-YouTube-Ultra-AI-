@@ -179,6 +179,7 @@ def plan(c, log):
                 'CẢNH BÁO: CLIP không chạy, '
                 'dùng tên file và TXT: ' + str(e)
             )
+            log('CHI TIẾT LỖI CLIP:\n' + traceback.format_exc())
 
     if not voices:
         raise ValueError('Không có voice')
