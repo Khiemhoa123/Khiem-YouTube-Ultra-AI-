@@ -112,8 +112,6 @@ def main():
         "--collect-submodules", "ctranslate2",
         "--collect-submodules", "tokenizers",
         "--collect-submodules", "transformers.models.clip",
-        "--module-collection-mode", "asyncio:py",
-        "--module-collection-mode", "unittest:py",
         "--collect-data", "transformers",
         "--collect-data", "tokenizers",
     ]
