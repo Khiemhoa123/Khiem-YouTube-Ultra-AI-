@@ -188,72 +188,75 @@ def prepend_mp4(c, intro, log):
 
 
 def insert_interview_cutaways(parts, intro, c, log):
-    """Two-second silent visual cutaways; preserve narration and section durations.
+    """Insert one unique silent two-second Interview visual per Number.
 
-    Only reuse footage from the selected interview source. This does NOT verify
-    speaker identity, so the operator must ensure the source features the subject.
+    Do not reuse the opening interview footage or repeat cutaway intervals.
+    The voice track and each section's total duration remain unchanged.
     """
     import copy
     if not intro or not c.get("interview_enabled", False):
         return parts
-    source = str(intro["source"])
-    try:
-        info = _probe(source)
-        length = float(info.get("format", {}).get("duration", 0) or 0)
-        if length < 4 or not any(st.get("codec_type") == "video" for st in info.get("streams", [])):
-            log("INTERVIEW CUTAWAY: Nguồn không đủ video.")
-            return parts
-    except Exception as exc:
-        log("INTERVIEW CUTAWAY: Không kiểm tra được video: " + str(exc))
-        return parts
+    root = Path(str(c.get("interview_folder", "")).strip())
+    sources = []
+    for path in sorted(root.rglob("*")) if root.is_dir() else []:
+        if not path.is_file() or path.suffix.lower() not in VIDEO_EXT:
+            continue
+        try:
+            info = _probe(path)
+            length = float(info.get("format", {}).get("duration", 0) or 0)
+            if length >= 2.0 and any(st.get("codec_type") == "video" for st in info.get("streams", [])):
+                sources.append((str(path), length))
+        except Exception as exc:
+            log("INTERVIEW: Bo qua nguon khong doc duoc " + path.name + ": " + str(exc))
+    if not sources:
+        raise RuntimeError("Khong co video Interview hop le de chen cutaway 2 giay.")
 
     fps = max(1, int(c.get("fps", 30)))
     frames2 = 2 * fps
-    rows = c.get("_interview_sample_rows", [])
-    opening_start = float(intro.get("source_start", 0))
-    reserved = [(opening_start, opening_start + float(intro.get("duration", 0)))]
-    samples = []
-    for a, b, phrase in rows:
-        a, b = float(a), float(b)
-        if b - a < 2.0:
-            continue
-        for t in (a, max(a, (a + b - 2) / 2)):
-            if t + 2 <= length and not any(t < y + 1 and t + 2 > x - 1 for x, y in reserved):
-                samples.append(t)
-    samples = sorted(set(samples))
-    if not samples:
-        # A separate two-second visual can be selected even without Whisper samples.
-        # Prefer footage outside the intro; overlap is permitted only when necessary.
-        for offset in (0.0, length * 0.45, max(0.0, length - 2.1)):
-            if offset + 2 <= length and not any(offset < b + 1 and offset + 2 > a - 1 for a,b in reserved):
-                samples.append(offset)
-        if not samples and length >= 2:
-            samples.append(max(0.0, length - 2.0))
-            log("INTERVIEW CUTAWAY: Thieu canh rieng, su dung lai 2 giay hinh anh tu nguon Interview.")
+    intro_source = str(Path(intro["source"]).resolve())
+    intro_start = float(intro.get("source_start", 0))
+    intro_end = intro_start + float(intro.get("duration", 0))
+    reserved = {intro_source: [(intro_start, intro_end)]}
+    number_parts = [p for p in parts if re.search(r"\\bnumber\\b", str(p.get("title", p.get("name", ""))), re.I)]
+    # If the renderer doesn't carry titles, use every section except Opening/Hook/Ending.
+    if not number_parts:
+        number_parts = [p for p in parts if not re.search(
+            r"opening|ending|hook", str(p.get("title", p.get("name", ""))), re.I)]
+    if not number_parts:
+        raise RuntimeError("Khong tim thay Number de chen Interview.")
 
-    def splice(clips, t, src_t, number):
+    def unique_candidates():
+        result = []
+        for src, length in sources:
+            intervals = reserved.get(str(Path(src).resolve()), [])
+            # Grid sampling with 0.5 second padding to avoid near-duplicate shots.
+            t = 0.0
+            while t + 2.0 <= length + 0.0001:
+                if not any(t < end + .5 and t + 2 > start - .5 for start, end in intervals):
+                    result.append((src, round(t, 3)))
+                t += 2.5
+        return result
+
+    def splice(clips, t, src, src_t, number):
         for index, old in enumerate(clips):
             left = int(round((t - float(old["start"])) * fps))
             total = int(old["frames"])
             right = total - left - frames2
             if left < 0 or right < 0:
                 continue
-            if t + 2 > float(old["start"]) + total / fps + 0.001:
+            if t + 2 > float(old["start"]) + total / fps + .001:
                 continue
             result = []
             if left:
                 before = copy.deepcopy(old)
-                before["frames"] = left
-                before["duration"] = left / fps
+                before["frames"], before["duration"] = left, left / fps
                 result.append(before)
-            result.append(dict(part=number, type="video", source=source,
+            result.append(dict(part=number, type="video", source=src,
                                source_start=src_t, start=t, frames=frames2,
                                duration=2.0, effect="Tĩnh", interview_cutaway=True))
             if right:
                 after = copy.deepcopy(old)
-                after["start"] = t + 2
-                after["frames"] = right
-                after["duration"] = right / fps
+                after["start"], after["frames"], after["duration"] = t + 2, right, right / fps
                 if after["type"] == "video":
                     after["source_start"] = float(old["source_start"]) + (left + frames2) / fps
                 result.append(after)
@@ -261,38 +264,33 @@ def insert_interview_cutaways(parts, intro, c, log):
         return None
 
     inserted = 0
-    for p in sorted(parts, key=lambda x: x.get("number", 0)):
+    for p in number_parts:
         number = int(p.get("number", 0))
-        if number < 1:
-            continue
         clips = p.get("clips", [])
-        if not clips:
-            continue
-        part_start = min(float(cl["start"]) for cl in clips)
-        duration = float(p.get("duration", 0))
-        if duration < 2:
-            raise RuntimeError(f"Number {number} ngắn hơn 2 giây, không thể chèn Interview.")
-        # Exactly one silent two-second interview visual at the start of each Number.
-        positions = [part_start]
-        placed = 0
-        for t in positions:
-            available = [x for x in samples if not any(x < b + 1 and x + 2 > a - 1 for a, b in reserved)]
-            if not available:
-                available = samples
-                log(f"INTERVIEW Number {number}: Da het canh khong trung, tai su dung canh Interview.")
-            # Prefer a deterministic variety of source positions, never repeat.
-            source_t = available[(number + placed * 7) % len(available)]
-            updated = splice(clips, t, source_t, number)
-            if updated is None:
-                log(f"INTERVIEW Number {number}: Không thể đặt cutaway tại {t:.2f}s.")
-                continue
-            clips = updated
-            reserved.append((source_t, source_t + 2))
-            placed += 1
-            inserted += 1
-        if placed < 1:
-            raise RuntimeError(f"Number {number}: không thể chèn đoạn Interview 2 giây. Hãy bổ sung video Interview.")
-        p["clips"] = clips
-        log(f"INTERVIEW Number {number}: Đã chèn {placed}/{len(positions)} đoạn hình ảnh, mỗi đoạn 2 giây.")
-    log(f"INTERVIEW: Tổng {inserted} cutaway 2 giây, không thay đổi độ dài voice.")
+        if not clips or float(p.get("duration", 0)) < 2:
+            raise RuntimeError(f"Number {number}: khong du 2 giay de chen Interview.")
+        start = min(float(cl["start"]) for cl in clips)
+        # Do not insert at a boundary that cannot hold two seconds; try subsequent clips.
+        positions = [start] + [float(cl["start"]) for cl in clips[1:]]
+        choices = unique_candidates()
+        if not choices:
+            raise RuntimeError(f"Number {number}: da het canh Interview khong trung lap. Hay bo sung video vao thu muc Interview.")
+        updated = None
+        chosen = None
+        for src, src_t in choices:
+            for t in positions:
+                updated = splice(clips, t, src, src_t, number)
+                if updated is not None:
+                    chosen = (src, src_t)
+                    break
+            if updated is not None:
+                break
+        if updated is None:
+            raise RuntimeError(f"Number {number}: khong the chen cutaway 2 giay vao timeline.")
+        p["clips"] = updated
+        src, src_t = chosen
+        reserved.setdefault(str(Path(src).resolve()), []).append((src_t, src_t + 2))
+        inserted += 1
+        log(f"INTERVIEW Number {number}: 1 canh rieng 2 giay tu {Path(src).name} tai {src_t:.1f}s.")
+    log(f"INTERVIEW: Da chen {inserted} canh rieng, khong lap nguon thoi gian va khong thay doi voice.")
     return parts
