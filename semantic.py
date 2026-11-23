@@ -26,7 +26,25 @@ class Semantic:
   except RuntimeError as e:
    log('CUDA lỗi; dùng CPU: '+str(e)); self.device='cpu'; self.model=self.model.to('cpu')
   self.processor=CLIPProcessor.from_pretrained(str(root),local_files_only=True)
+  if self.device=='cuda':
+   # CUDA can accept model.to() but fail on the first actual kernel.
+   # Test a real inference before starting thousands of scene rankings.
+   try:
+    with torch.inference_mode():
+     test=self.processor(text=['test'],return_tensors='pt',padding=True).to('cuda')
+     self.model.get_text_features(**test)
+     torch.cuda.synchronize()
+   except Exception as exc:
+    log('CLIP CUDA khong tuong thich GPU; tu dong chuyen CPU: '+str(exc))
+    self._cpu_fallback()
   log('CLIP local: '+self.device)
+ def _cpu_fallback(self):
+  if self.device=='cpu': return
+  self.device='cpu'
+  self.model=self.model.to('cpu')
+  self.texts.clear()
+  self.cache.clear()
+  self.log('CLIP: da chuyen CPU, tiep tuc cham diem AI.')
  def feature(self,kind,path,start):
   step={"Fast":10,"Smart":5,"Deep":2}[self.mode]; start=int(start/step)*step if kind=="video" else 0; st=Path(path).stat(); key=(str(path),kind,start,st.st_size,st.st_mtime_ns,"clip-base-v1"); disk=json.dumps(key)
   hit=self.db.execute("SELECT v FROM cache WHERE k=?",(disk,)).fetchone()
@@ -45,8 +63,18 @@ class Semantic:
  def score(self,kind,path,start,length,query):
   query=query.strip() or 'archival documentary footage'
   if query not in self.texts:
-   with self.torch.inference_mode():
-    v=self.model.get_text_features(**self.processor(text=[query],return_tensors='pt',padding=True,truncation=True,max_length=77).to(self.device)); self.texts[query]=(v/v.norm(dim=-1,keepdim=True)).cpu()
+   try:
+    with self.torch.inference_mode():
+     v=self.model.get_text_features(**self.processor(text=[query],return_tensors='pt',padding=True,truncation=True,max_length=77).to(self.device))
+     if self.device=='cuda': self.torch.cuda.synchronize()
+     self.texts[query]=(v/v.norm(dim=-1,keepdim=True)).cpu()
+   except RuntimeError as exc:
+    if self.device!='cuda': raise
+    self.log('CLIP CUDA loi luc cham diem, thu CPU: '+str(exc))
+    self._cpu_fallback()
+    with self.torch.inference_mode():
+     v=self.model.get_text_features(**self.processor(text=[query],return_tensors='pt',padding=True,truncation=True,max_length=77).to('cpu'))
+     self.texts[query]=(v/v.norm(dim=-1,keepdim=True)).cpu()
   offsets=[0] if kind=='image' else [length*.5] if self.mode=="Fast" else [length*.2,length*.5,length*.8]
   values=[]
   for offset in offsets:
