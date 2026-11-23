@@ -29,33 +29,33 @@ def _similarity(a, b):
     return len(x & y) / max(1, len(x | y))
 
 def _script_text(folder):
-    files = sorted(Path(folder).glob("*.txt"))
-    if not files:
-        return ""
-    return files[0].read_text(encoding="utf-8-sig", errors="replace")[:6000]
+    root = Path(folder)
+    files = sorted(root.glob("*.txt")) if root.is_dir() else ([root] if root.is_file() else [])
+    pieces = []
+    for p in files:
+        try:
+            pieces.append(p.read_text(encoding="utf-8-sig", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(pieces)
 
-def _sample_rows(path, duration, model, log):
-    """Transcribe independent windows; retain word timings for long Whisper segments."""
+def _transcribe_full(path, duration, model, log):
+    """Transcribe the complete interview in short, nonoverlapping windows."""
     from whisper_audio_fix_v11 import transcribe_media
     from types import SimpleNamespace
-    # Nonoverlapping samples avoid duplicate words and false cross-window passages.
-    window = 32.0
-    if duration <= 180:
-        offsets = [float(x) for x in range(0, max(1, int(duration)), 30)]
-    else:
-        offsets = sorted(set(round(max(0, duration-window)*f, 2)
-                             for f in (0.0, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0)))
     rows = []
+    window = 28.0
     with tempfile.TemporaryDirectory() as td:
-        wav = Path(td) / "sample.wav"
-        for offset in offsets:
-            remaining = min(window, max(0.0, duration-offset))
-            if remaining < 2:
+        wav = Path(td) / "speech.wav"
+        for index in range(int((duration + window - 0.001) // window)):
+            offset = index * window
+            remaining = min(window, duration - offset)
+            if remaining < 0.5:
                 continue
             try:
-                _run(["ffmpeg","-v","error","-y","-ss",str(offset),
-                      "-i",str(path),"-t",str(remaining),"-vn",
-                      "-ac","1","-ar","16000",str(wav)])
+                _run(["ffmpeg", "-v", "error", "-y", "-ss", str(offset),
+                      "-i", str(path), "-t", str(remaining), "-vn",
+                      "-ac", "1", "-ar", "16000", str(wav)])
                 segments, _ = transcribe_media(
                     wav, model=model, vad_filter=False, beam_size=3,
                     word_timestamps=True, condition_on_previous_text=False)
@@ -63,155 +63,151 @@ def _sample_rows(path, duration, model, log):
                 for seg in segments:
                     words = getattr(seg, "words", None) or []
                     if words:
-                        for word in words:
-                            text = str(getattr(word, "word", "") or "").strip()
-                            if text and word.start is not None and word.end is not None:
+                        for w in words:
+                            if w.start is None or w.end is None:
+                                continue
+                            text = str(w.word or "").strip()
+                            if text:
                                 rows.append(SimpleNamespace(
-                                    start=max(0.0,float(word.start)+offset),
-                                    end=min(duration,float(word.end)+offset),text=text))
+                                    start=max(0.0, offset + float(w.start)),
+                                    end=min(duration, offset + float(w.end)), text=text))
                                 count += 1
                     elif str(seg.text).strip():
                         rows.append(SimpleNamespace(
-                            start=float(seg.start)+offset,
-                            end=float(seg.end)+offset,text=str(seg.text).strip()))
+                            start=offset + float(seg.start),
+                            end=min(duration, offset + float(seg.end)),
+                            text=str(seg.text).strip()))
                         count += 1
-                log(f"WHISPER: {Path(path).name} tai {offset:.1f}s: {count} tu/doan.")
+                log(f"WHISPER: {Path(path).name} {offset:.0f}-{offset+remaining:.0f}s: {count} tu/doan")
             except Exception as exc:
-                log(f"WHISPER: Loi mau {Path(path).name} tai {offset:.1f}s: {exc}")
-    return sorted(rows, key=lambda x: (x.start,x.end))
+                log(f"WHISPER: Loi {Path(path).name} tai {offset:.0f}s: {exc}")
+    return sorted(rows, key=lambda r: (r.start, r.end))
+
+def _cached_rows(path, duration, model, cache_dir, log):
+    from types import SimpleNamespace
+    import hashlib
+    stat = Path(path).stat()
+    key = hashlib.sha256((str(Path(path).resolve()) + "|" + str(stat.st_size) +
+                          "|" + str(stat.st_mtime_ns) + "|full-v2").encode("utf-8")).hexdigest()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / (key + ".json")
+    if dest.exists():
+        try:
+            raw = json.loads(dest.read_text(encoding="utf-8"))
+            rows = [SimpleNamespace(start=float(x[0]), end=float(x[1]), text=str(x[2]))
+                    for x in raw]
+            log(f"WHISPER CACHE: {Path(path).name}: {len(rows)} tu/doan")
+            return rows
+        except (OSError, ValueError, TypeError, IndexError):
+            pass
+    rows = _transcribe_full(path, duration, model, log)
+    if rows:
+        tmp = dest.with_suffix(".tmp")
+        tmp.write_text(json.dumps([[r.start, r.end, r.text] for r in rows],
+                                  ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, dest)
+    return rows
+
+def _speech_candidates(rows, script, max_seconds):
+    """Score natural sentence or pause boundaries; never stitch separated windows."""
+    if not rows:
+        return []
+    minimum = min(6.0, max_seconds)
+    candidates = []
+    for i, first in enumerate(rows):
+        if i:
+            prev = rows[i - 1]
+            gap = first.start - prev.end
+            if gap < 0.28 and not prev.text.rstrip().endswith((".", "?", "!")):
+                continue
+        words = []
+        for j in range(i, min(len(rows), i + 165)):
+            cur = rows[j]
+            if j > i and cur.start - rows[j - 1].end > 1.5:
+                break
+            dur = cur.end - first.start
+            if dur > max_seconds:
+                break
+            words.append(cur.text.strip())
+            if dur < minimum or len(words) < 9:
+                continue
+            punctuation = cur.text.rstrip().endswith((".", "?", "!"))
+            pause = (rows[j + 1].start - cur.end) if j + 1 < len(rows) else 0.0
+            if not punctuation and pause < 0.45:
+                continue
+            phrase = " ".join(words)
+            similarity = _similarity(script, phrase)
+            score = similarity * 3 + min(dur, 24) / 100 + (0.15 if punctuation else 0.10)
+            candidates.append((score, float(first.start), float(dur), phrase))
+    return candidates
 
 def choose_intro(c, log):
-    """Return optional intro dict. Never silently select a low-confidence passage."""
+    """Scan all interviews, compare against all script TXT, select complete speech."""
     folder = str(c.get("interview_folder", "")).strip()
     if not c.get("interview_enabled") or not folder:
         return None
     root = Path(folder)
     if not root.is_dir():
-        log("Bỏ Interview: thư mục không tồn tại."); return None
-    videos = [p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_EXT]
+        raise RuntimeError("Thu muc Interview khong ton tai: " + folder)
+    videos = sorted(p for p in root.rglob("*")
+                    if p.is_file() and p.suffix.lower() in VIDEO_EXT)
     if not videos:
-        log("Bỏ Interview: không có video."); return None
-    script = _script_text(c["txt"])
-    if not script.strip():
-        log("INTERVIEW: TXT mở đầu trống, tìm câu chuyện hoàn chỉnh không cần khớp kịch bản.")
-    model = None
+        raise RuntimeError("Thu muc Interview khong co video.")
+    script = _script_text(c.get("txt", ""))
+    log(f"INTERVIEW: Da doc {len(script.split())} tu tu toan bo TXT kich ban.")
+    # Voice files are used to validate the project's audio structure.
+    voice_root = Path(str(c.get("voice", "")))
+    if voice_root.is_dir():
+        voice_files = [p for p in voice_root.rglob("*")
+                       if p.suffix.lower() in (".mp3", ".wav", ".m4a", ".flac")]
+        log(f"INTERVIEW: Phat hien {len(voice_files)} file voice kich ban.")
     try:
-        from whisper_audio_fix_v11 import get_model, transcribe_media
-        log("WHISPER: Đang nạp mô hình nhận diện tiếng nói.")
+        from whisper_audio_fix_v11 import get_model
+        log("WHISPER: Dang nap mo hinh nhan dien tieng noi.")
         model = get_model()
-        log("WHISPER: Mô hình sẵn sàng.")
+        log("WHISPER: Mo hinh san sang.")
     except Exception as exc:
-        log("Whisper không sẵn sàng, chuyển sang chọn interview dự phòng: " + str(exc))
+        raise RuntimeError("Khong the nap Whisper: " + str(exc)) from exc
     max_seconds = min(30.0, max(1.0, float(c.get("interview_max_seconds", 30))))
+    # Store cache outside the export directory so repeated exports can reuse it.
+    cache_dir = Path.home() / ".khiem_youtube" / "interview_transcripts"
+    all_candidates = []
     sampled = {}
-    candidates = []
-    fallback = []
-    audio_sources = []
-    log(f"INTERVIEW: Tìm thấy {len(videos)} video.")
-    for index, path in enumerate(sorted(videos)[:5], 1):
+    log(f"INTERVIEW: Quet TOAN BO {len(videos)} video; lan dau co the mat nhieu thoi gian.")
+    for index, path in enumerate(videos, 1):
         try:
-            log(f"INTERVIEW {index}/{len(videos)}: Kiểm tra {path.name}")
             info = _probe(path)
-            if not any(s.get("codec_type") == "audio" for s in info["streams"]):
-                log("Bỏ qua video không có tiếng: " + path.name)
+            if not any(st.get("codec_type") == "audio" for st in info.get("streams", [])):
+                log(f"INTERVIEW {index}: Bo qua video khong co audio: {path.name}")
+                continue
+            if not any(st.get("codec_type") == "video" for st in info.get("streams", [])):
+                log(f"INTERVIEW {index}: Bo qua video khong co hinh: {path.name}")
                 continue
             duration = float(info.get("format", {}).get("duration", 0) or 0)
-            if not any(st.get("codec_type") == "video" for st in info["streams"]) or duration < 4:
-                log("Bỏ qua nguồn Interview quá ngắn hoặc thiếu hình: " + path.name)
+            if duration < 6:
+                log(f"INTERVIEW {index}: Bo qua video ngan hon 6s: {path.name}")
                 continue
-            audio_sources.append((str(path), duration))
-            if model is None:
-                continue
-            log(f"WHISPER: Giải mã âm thanh {path.name} ({duration:.1f}s).")
-            rows = _sample_rows(path, duration, model, log)
+            log(f"INTERVIEW {index}/{len(videos)}: {path.name} ({duration:.1f}s)")
+            rows = _cached_rows(path, duration, model, cache_dir, log)
             sampled[str(path)] = rows
-            log(f"WHISPER: {path.name}: {len(rows)} doan nhan dien; mau: "+ " | ".join(x.text.strip()[:75] for x in rows[:3]))
-            log(f"INTERVIEW: {len(rows)} đoạn mẫu.")
-            # Whisper often omits punctuation. Use natural pauses as additional
-            # sentence boundaries and never span an unsampled audio gap.
-            rows = sorted(rows, key=lambda x: (x.start, x.end))
-            for i, first in enumerate(rows):
-                if i:
-                    prev = rows[i-1]
-                    if first.start - prev.end < 0.25 and not prev.text.strip().endswith((".", "?", "!")):
-                        continue
-                for j in range(i, min(len(rows), i + 130)):
-                    last = rows[j]
-                    if j > i and last.start - rows[j-1].end > 1.5:
-                        break
-                    dur = float(last.end - first.start)
-                    if dur > max_seconds:
-                        break
-                    if dur < min(6.0, max_seconds):
-                        continue
-                    next_pause = rows[j+1].start-last.end if j+1 < len(rows) else 0
-                    has_ending = last.text.strip().endswith((".", "?", "!"))
-                    if not has_ending and next_pause < 0.4:
-                        continue
-                    phrase = " ".join(x.text.strip() for x in rows[i:j+1])
-                    if len(phrase.split()) < 8:
-                        continue
-                    score = _similarity(script, phrase)
-                    score += 0.05 if has_ending else 0.025
-                    score += min(dur, 25) / 1000
-                    item = (score, str(path), float(first.start), dur, phrase)
-                    candidates.append(item)
-                    fallback.append(item)
+            matches = _speech_candidates(rows, script, max_seconds)
+            log(f"INTERVIEW: {path.name}: {len(rows)} tu/doan, {len(matches)} ung vien.")
+            all_candidates.extend((score, str(path), start, length, phrase)
+                                  for score, start, length, phrase in matches)
         except Exception as exc:
-            log("Không phân tích được " + path.name + ": " + str(exc))
-    # When Whisper omits punctuation and pauses, its segment boundaries are
-    # still useful. Select a complete group of speech segments rather than
-    # an arbitrary time offset; reject samples with no recognized words.
-    if not candidates:
-        for path, rows in sampled.items():
-            rows = sorted(rows, key=lambda x: (x.start, x.end))
-            for i, first in enumerate(rows):
-                for j in range(i, min(len(rows), i + 130)):
-                    last = rows[j]
-                    if j > i and last.start - rows[j-1].end > 1.5:
-                        break
-                    dur = last.end - first.start
-                    if dur > max_seconds:
-                        break
-                    if dur < min(6.0, max_seconds):
-                        continue
-                    phrase = " ".join(x.text.strip() for x in rows[i:j+1])
-                    if len(phrase.split()) < 10:
-                        continue
-                    # Prefer end punctuation or a natural pause, but don't
-                    # require either: Whisper punctuation is not reliable.
-                    score = _similarity(script, phrase)
-                    score += 0.04 if last.text.strip().endswith((".", "?", "!")) else 0
-                    score += min(dur, 25) / 1000
-                    fallback.append((score, path, float(first.start), float(dur), phrase))
-        log(f"INTERVIEW: {len(fallback)} doan loi noi du phong tu Whisper.")
-    if candidates:
-        candidates.sort(reverse=True)
-        best = candidates[0]
-        log("Top đoạn phỏng vấn (điểm khớp từ ngữ, chưa xác minh khuôn mặt):")
-        for score, path, start, dur, phrase in candidates[:3]:
-            log(f"  {Path(path).name} | {start:.1f}s | {dur:.1f}s | {score:.2f} | {phrase[:100]}")
-        if best[0] >= 0.12 and _similarity(script, best[4]) >= 0.09:
-            c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[best[1]]]
-            return {'source':best[1], 'source_start':best[2], 'duration':best[3], 'transcript':best[4], 'score':best[0], 'selection_mode':'matched'}
-    if fallback:
-        def curiosity(item):
-            phrase = item[4]
-            return (2 if '?' in phrase else 1 if '!' in phrase else 0) + min(len(_tokens(phrase)), 36)/36
-        ranked = sorted(fallback, key=lambda item: (curiosity(item), min(item[3], 24)), reverse=True)
-        score, path, start, dur, phrase = random.SystemRandom().choice(ranked[:5])
-        c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[path]]
-        log(f'INTERVIEW: Chon cau noi tron ven {dur:.1f}s trong {Path(path).name}.')
-        return {'source':path, 'source_start':start, 'duration':dur,
-                'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
-    # Do not substitute an arbitrary audio segment: it can end mid-sentence.
-    # Fail explicitly rather than create a misleading, abruptly cut interview.
-    log('INTERVIEW: Khong co doan loi noi phu hop. Kiem tra log WHISPER va chat luong am thanh nguon.')
-    raise RuntimeError(
-        'Whisper khong nhan dien du loi noi de chon interview mo dau. '
-        'Hay them video Interview co loi noi ro rang hoac kiem tra Whisper.')
-    log('INTERVIEW: Khong co video hop le co ca hinh va am thanh trong 5 file dau.')
-    return None
+            log(f"INTERVIEW: Khong phan tich duoc {path.name}: {exc}")
+    if not all_candidates:
+        raise RuntimeError(
+            "Da quet toan bo Interview nhung khong tim duoc doan loi noi co diem "
+            "bat dau/ket thuc tu nhien trong 30s. Kiem tra log WHISPER.")
+    all_candidates.sort(key=lambda item: item[0], reverse=True)
+    score, path, start, duration, phrase = all_candidates[0]
+    c["_interview_sample_rows"] = [(r.start, r.end, r.text) for r in sampled[path]]
+    log(f"INTERVIEW DA CHON: {Path(path).name} | {start:.2f}s -> "
+        f"{start+duration:.2f}s | {duration:.2f}s | diem {score:.3f}")
+    log("INTERVIEW NOI DUNG: " + phrase[:600])
+    return {"source": path, "source_start": start, "duration": duration,
+            "transcript": phrase, "score": score, "selection_mode": "full_scan"}
 
 def prepend_mp4(c, intro, log):
     """Prepend interview with original sound. Re-encode for reliable A/V sync."""
