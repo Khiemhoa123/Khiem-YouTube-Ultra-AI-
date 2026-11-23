@@ -269,9 +269,31 @@ def insert_interview_cutaways(parts, intro, c, log):
         clips = p.get("clips", [])
         if not clips or float(p.get("duration", 0)) < 2:
             raise RuntimeError(f"Number {number}: khong du 2 giay de chen Interview.")
+        # Place the interview INSIDE a still image, not at the Number boundary
+        # or directly next to another video. Keep at least one second of the
+        # original image on both sides whenever the clip allows it.
         start = min(float(cl["start"]) for cl in clips)
-        # Do not insert at a boundary that cannot hold two seconds; try subsequent clips.
-        positions = [start] + [float(cl["start"]) for cl in clips[1:]]
+        finish = start + float(p.get("duration", 0))
+        positions = []
+        for cl in clips:
+            if cl.get("type") != "image":
+                continue
+            clip_start = float(cl["start"])
+            clip_duration = float(cl.get("duration", 0))
+            if clip_duration < 4.0:
+                continue
+            t = round((clip_start + (clip_duration - 2.0) / 2.0) * fps) / fps
+            if t < start + 3.0 or t + 2.0 > finish - 3.0:
+                continue
+            positions.append(t)
+        # Prefer a location around the middle of the Number to avoid
+        # repeated back-to-back interview shots at section boundaries.
+        midpoint = (start + finish) / 2.0
+        positions.sort(key=lambda t: abs((t + 1.0) - midpoint))
+        if not positions:
+            raise RuntimeError(
+                f"Number {number}: khong co anh tinh du 4 giay de chen Interview o giua anh. "
+                "Hay them anh hoac dieu chinh thoi luong canh.")
         choices = unique_candidates()
         if not choices:
             raise RuntimeError(f"Number {number}: da het canh Interview khong trung lap. Hay bo sung video vao thu muc Interview.")
