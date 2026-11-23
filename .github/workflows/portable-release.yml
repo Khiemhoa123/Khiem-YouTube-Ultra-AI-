@@ -75,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
-           $parts = @(Get-ChildItem portable_release_assets -Filter "portable_update.part*" | ForEach-Object { $_.FullName })
+          $parts = @(Get-ChildItem portable_release_assets -Filter "portable_update.part*" | ForEach-Object { $_.FullName })
           if ($parts.Count -eq 0) { throw "No release parts generated" }
           gh release create $env:VERSION portable_release_assets/portable_manifest.json $parts --repo $env:GITHUB_REPOSITORY --title "Khiem Youtube $env:VERSION" --notes "Portable update. Existing AI models and settings are preserved." --latest
       - name: Upload diagnostics if failed
