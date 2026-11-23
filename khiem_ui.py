@@ -2332,7 +2332,7 @@ class KhiemYoutube:
                     logger
                 )
                 if config.get("_interview_intro"):
-                    logger("Đã thêm interview đầu timeline CapCut: " + str(project_path))
+                    logger("Đã thêm các cảnh Interview 2 giây trong timeline CapCut: " + str(project_path))
 
             elif mode == "render":
                 logger("MP4: Bắt đầu render.")
@@ -2342,9 +2342,8 @@ class KhiemYoutube:
                     logger,
                     self.set_progress
                 )
-                if config.get("_interview_intro"):
-                    from smart_interview_intro import prepend_mp4
-                    prepend_mp4(config, config["_interview_intro"], logger)
+                # Interview cutaways are already included in parts.
+                # Never prepend an additional interview clip to the rendered MP4.
 
             self.set_progress(100)
             logger("HOÀN THÀNH.")
