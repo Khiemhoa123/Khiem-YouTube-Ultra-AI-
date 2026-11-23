@@ -65,7 +65,8 @@ class UI:
         self.candidates = []
         self.selected = {}
         self.busy = False
-        self.mode = tk.StringVar(value="safe")
+        self.auto_install = "--one-click" in sys.argv
+        self.mode = tk.StringVar(value="full" if self.auto_install else "safe")
         self.backup = tk.BooleanVar(value=True)
         self.verify = tk.BooleanVar(value=True)
         self.restart = tk.BooleanVar(value=False)
@@ -167,6 +168,9 @@ class UI:
             self.root.after(0, lambda: self.status.set(
                 f"GitHub {self.revision[:12]} | {len(result)} file thay đổi | Thư mục: {ROOT}"))
             self.log("Đã kiểm tra: " + str(len(result)) + " file thay đổi.")
+            if self.auto_install:
+                self.root.after(0, self.install if result else
+                                lambda: messagebox.showinfo("Cập nhật", "Đã là phiên bản mã nguồn mới nhất."))
         self.task(work)
 
     def refresh(self):
@@ -338,4 +342,7 @@ class UI:
         self.root.destroy()
 
 if __name__ == "__main__":
-    UI().root.mainloop()
+    ui = UI()
+    if ui.auto_install:
+        ui.root.after(250, ui.check)
+    ui.root.mainloop()
