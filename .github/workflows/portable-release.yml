@@ -1,0 +1,88 @@
+name: Build and publish Khiem Youtube Portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New release tag, e.g. v11.6 (must not already exist)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portable-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate release version
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:VERSION -notmatch '^v[0-9]+\.[0-9]+(\.[0-9]+)?$') { throw "Invalid version" }
+          gh release view $env:VERSION --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release already exists" }
+          exit 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "pyinstaller>=6.16,<7" "transformers>=4.44,<5" "faster-whisper>=1.1,<2" "ctranslate2>=4.4,<5" "huggingface_hub>=0.25,<1" pillow numpy scipy opencv-python-headless
+      - name: Download offline AI models
+        shell: pwsh
+        run: |
+          @'
+          from huggingface_hub import snapshot_download
+          snapshot_download("openai/clip-vit-base-patch32", local_dir="models/clip")
+          snapshot_download("Systran/faster-whisper-base", local_dir="models/whisper")
+          '@ | python -
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue).Source
+          if (-not $ffmpeg) {
+            $ffmpeg = Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Filter ffmpeg.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $ffmpeg) { throw "FFmpeg missing" }
+          $bin = Split-Path $ffmpeg
+          New-Item -ItemType Directory -Force tools/ffmpeg | Out-Null
+          Copy-Item (Join-Path $bin 'ffmpeg.exe') tools/ffmpeg/
+          Copy-Item (Join-Path $bin 'ffprobe.exe') tools/ffmpeg/
+      - name: Build Portable
+        shell: pwsh
+        run: python -X utf8 build_portable.py
+      - name: Package verified update
+        shell: pwsh
+        env:
+          KHIEM_RELEASE_VERSION: ${{ inputs.version }}
+        run: python -X utf8 make_portable_release.py
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create $env:VERSION portable_release_assets/portable_manifest.json portable_release_assets/portable_update.part* --repo $env:GITHUB_REPOSITORY --title "Khiem Youtube $env:VERSION" --notes "Portable update. Existing AI models and settings are preserved." --latest
+      - name: Upload diagnostics if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-build-logs
+          path: |
+            build_portable.log
+            build_error.txt
+          if-no-files-found: ignore
