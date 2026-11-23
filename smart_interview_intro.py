@@ -271,21 +271,24 @@ def insert_interview_cutaways(parts, intro, c, log):
     intro_start = float(intro.get("source_start", 0))
     intro_end = intro_start + float(intro.get("duration", 0))
     reserved = {intro_source: [(intro_start, intro_end)]}
-    # app.py only provides number and voice, not a section title.
-    # Derive the section from the actual voice filename to avoid placing
-    # interview cutaways in Opening, Hook, or Ending.
+    # app.py stores section IDs as numeric 'number' fields; filenames may
+    # be "02 - Name.mp3" without the literal word Number.
     def section_label(part):
         return (str(part.get("title") or part.get("name") or "") + " " +
                 Path(str(part.get("voice") or "")).stem).lower()
-    number_parts = [p for p in parts
-                    if re.search(r"\bnumber\s*\d+\b", section_label(p), re.I)
-                    and not re.search(r"opening|ending|hook", section_label(p), re.I)]
+    ordered_parts = sorted(parts, key=lambda p: int(p.get("number", 0)))
+    number_parts = [p for p in ordered_parts if
+                    not re.search(r"opening|ending|hook|outro|intro", section_label(p), re.I)
+                    and re.search(r"\\bnumber\\b", section_label(p), re.I)]
     if not number_parts:
-        number_parts = [p for p in parts
-                        if not re.search(r"opening|ending|hook", section_label(p), re.I)
-                        and re.search(r"\bnumber\b", section_label(p), re.I)]
+        # The common naming convention is 01 Opening, 02... Number, last Ending.
+        # When no labels are available, exclude the first and last sections
+        # rather than treating all sections as Numbers.
+        number_parts = [p for p in ordered_parts[1:-1]
+                        if not re.search(r"opening|ending|hook|outro|intro", section_label(p), re.I)]
     if not number_parts:
-        raise RuntimeError("Khong tim thay Number de chen Interview.")
+        log("INTERVIEW: Khong co Number duoc xac nhan; bo qua cutaway, tiep tuc xuat.")
+        return parts
 
     def unique_candidates():
         result = []
