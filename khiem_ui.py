@@ -74,7 +74,7 @@ DEFAULTS = {
     "name": "New Project",
     "speed": "Smart",
     "smart_timeline": "1",
-    "min_video_percent": "40",
+    "min_video_percent": "30",
     "target_video_percent": "60",
     "vn": "1",
     "an": "3",
@@ -2223,7 +2223,7 @@ class KhiemYoutube:
                             source_manifest.append((str(item.relative_to(folder)),
                                                     field, stat.st_size, stat.st_mtime_ns))
             # Invalidate old timelines once after script-first planner upgrade.
-            fingerprint_fields["_planner_version"] = "smart_video_balance_v14"
+            fingerprint_fields["_planner_version"] = "scan_all_balance_v15"
             fingerprint = hashlib.sha256(json.dumps(
                 [fingerprint_fields, source_manifest], ensure_ascii=False,
                 sort_keys=True, default=str
