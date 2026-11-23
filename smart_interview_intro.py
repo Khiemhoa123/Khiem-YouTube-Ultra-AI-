@@ -104,12 +104,12 @@ def choose_intro(c, log):
                     dur = float(last.end - first.start)
                     if dur > max_seconds:
                         break
-                    if dur < 5 or dur > max_seconds:
+                    if dur < min(10.0, max_seconds) or dur > max_seconds:
                         continue
                     if not last.text.rstrip().endswith((".", "?", "!")):
                         continue
                     phrase = " ".join(s.text.strip() for s in rows[i:j + 1])
-                    if len(_tokens(phrase)) < 12:
+                    if len(_tokens(phrase)) < 18:
                         continue
                     score = _similarity(script, phrase)
                     # Prefer coherent passages with complete ending punctuation.
@@ -132,26 +132,18 @@ def choose_intro(c, log):
     if fallback:
         def curiosity(item):
             phrase = item[4]
-            return (2 if '?' in phrase else 1 if '!' in phrase else 0) + (1 if phrase.rstrip().endswith(('.', '?', '!')) else 0) + min(len(_tokens(phrase)), 24)/24
+            return (2 if '?' in phrase else 1 if '!' in phrase else 0) + min(len(_tokens(phrase)), 36)/36
         ranked = sorted(fallback, key=lambda item: (curiosity(item), min(item[3], 24)), reverse=True)
         score, path, start, dur, phrase = random.SystemRandom().choice(ranked[:5])
         c['_interview_sample_rows'] = [(r.start,r.end,r.text) for r in sampled[path]]
-        log(f'INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {dur:.1f}s | co loi noi, chua xac minh khuon mat.')
-        return {'source':path, 'source_start':start, 'duration':dur, 'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
-    # If Whisper yields no sentence, still use an interview source with an audio stream.
-    # This is a media fallback, not a claim that speech or speaker identity was verified.
-    if audio_sources:
-        path, duration = audio_sources[0]
-        start = min(max(0.0, duration * 0.15), max(0.0, duration - 4.0))
-        clip_duration = min(max_seconds, duration - start)
-        if clip_duration < 2.0:
-            start = 0.0
-            clip_duration = min(max_seconds, duration)
-        c['_interview_sample_rows'] = []
-        log(f"INTERVIEW DU PHONG: {Path(path).name} | {start:.1f}s | {clip_duration:.1f}s. "
-            "Co am thanh goc, chua xac minh loi noi hay danh tinh. Hay kiem tra truoc khi dang.")
-        return {'source':path, 'source_start':start, 'duration':clip_duration,
-                'transcript':'', 'score':0.0, 'selection_mode':'audio_source_fallback'}
+        log(f'INTERVIEW: Chon cau noi tron ven {dur:.1f}s trong {Path(path).name}.')
+        return {'source':path, 'source_start':start, 'duration':dur,
+                'transcript':phrase, 'score':score, 'selection_mode':'spoken_fallback'}
+    # Do not substitute an arbitrary audio segment: it can end mid-sentence.
+    # Fail explicitly rather than create a misleading, abruptly cut interview.
+    raise RuntimeError(
+        'Khong tim duoc doan hoi thoai tron ven trong gioi han thoi luong. '
+        'Hay them video Interview co loi noi ro rang hoac kiem tra Whisper.')
     log('INTERVIEW: Khong co video hop le co ca hinh va am thanh trong 5 file dau.')
     return None
 
