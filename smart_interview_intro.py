@@ -95,26 +95,33 @@ def choose_intro(c, log):
             rows = _sample_rows(path, duration, model, log)
             sampled[str(path)] = rows
             log(f"INTERVIEW: {len(rows)} đoạn mẫu.")
-            # One continuous thought: start after a sentence boundary, end at punctuation.
+            # Whisper often omits punctuation. Use natural pauses as additional
+            # sentence boundaries and never span an unsampled audio gap.
+            rows = sorted(rows, key=lambda x: (x.start, x.end))
             for i, first in enumerate(rows):
-                if i and rows[i-1].text.strip() and not rows[i-1].text.rstrip().endswith((".", "?", "!")):
-                    continue
-                for j in range(i, min(len(rows), i + 30)):
+                if i:
+                    prev = rows[i-1]
+                    if first.start - prev.end < 0.35 and not prev.text.strip().endswith((".", "?", "!")):
+                        continue
+                for j in range(i, min(len(rows), i + 35)):
                     last = rows[j]
+                    if j > i and last.start - rows[j-1].end > 1.5:
+                        break
                     dur = float(last.end - first.start)
                     if dur > max_seconds:
                         break
-                    if dur < min(10.0, max_seconds) or dur > max_seconds:
+                    if dur < min(8.0, max_seconds):
                         continue
-                    if not last.text.rstrip().endswith((".", "?", "!")):
+                    next_pause = rows[j+1].start-last.end if j+1 < len(rows) else 0
+                    has_ending = last.text.strip().endswith((".", "?", "!"))
+                    if not has_ending and next_pause < 0.4:
                         continue
-                    phrase = " ".join(s.text.strip() for s in rows[i:j + 1])
-                    if len(_tokens(phrase)) < 18:
+                    phrase = " ".join(x.text.strip() for x in rows[i:j+1])
+                    if len(phrase.split()) < 12:
                         continue
                     score = _similarity(script, phrase)
-                    # Prefer coherent passages with complete ending punctuation.
-                    if phrase.rstrip().endswith((".", "?", "!")):
-                        score += 0.03
+                    score += 0.05 if has_ending else 0.025
+                    score += min(dur, 25) / 1000
                     item = (score, str(path), float(first.start), dur, phrase)
                     candidates.append(item)
                     fallback.append(item)
