@@ -215,68 +215,71 @@ def plan(c, log):
             ('image', I, c['images']),
             ('video', V, c['videos'])
         ]:
-            # Strict section ownership: only numbered top-level folders.
             base = Path(root).resolve()
-            folders = sorted(
-                x for x in base.iterdir()
-                if x.is_dir() and number(x) == n
-                and x.resolve().parent == base
-            )
-            if len(folders) > 1:
-                raise ValueError(f'Phần {n}: nhiều thư mục trùng số trong {base}.')
-            allowed = set(shared[kind + 's']) if shared is not None else None
+            if shared is not None:
+                # AUTO PROJECT intentionally shares discovered media across all sections.
+                # No copying; interview and export folders were excluded by discover().
+                folders = []
+                allowed = set(shared[kind + 's'])
+                sources = sorted(allowed)
+            else:
+                # Manual mode keeps strict numbered-folder ownership.
+                folders = sorted(
+                    x for x in base.iterdir()
+                    if x.is_dir() and number(x) == n
+                    and x.resolve().parent == base
+                )
+                if len(folders) > 1:
+                    raise ValueError(f'Phần {n}: nhiều thư mục trùng số trong {base}.')
+                allowed = None
+                sources = [
+                    src for folder in folders for src in sorted(folder.rglob('*'))
+                    if src.resolve().is_relative_to(folder.resolve())
+                ]
 
             pools[kind] = []
 
-            for folder in folders:
-                for src in sorted(folder.rglob('*')):
-                    if not src.resolve().is_relative_to(folder.resolve()):
-                        continue
-                    if allowed is not None and src not in allowed:
-                        continue
-                    if (
-                        not src.is_file()
-                        or src.suffix.lower() not in ext
-                    ):
-                        continue
+            for src in sources:
+                if not src.is_file() or src.suffix.lower() not in ext:
+                    continue
 
-                    try:
-                        h = hashes.setdefault(
-                            src, digest_cached(src)
-                        )
+                try:
+                    h = hashes.setdefault(
+                        src, digest_cached(src)
+                    )
 
-                        if kind == 'video':
-                            if h not in lens:
-                                lens[h] = duration_cached(src)
+                    if kind == 'video':
+                        if h not in lens:
+                            lens[h] = duration_cached(src)
 
-                            if (
-                                not math.isfinite(lens[h])
-                                or lens[h] <= 0
-                            ):
-                                raise ValueError(
-                                    'Thời lượng không hợp lệ'
-                                )
+                        if (
+                            not math.isfinite(lens[h])
+                            or lens[h] <= 0
+                        ):
+                            raise ValueError(
+                                'Thời lượng không hợp lệ'
+                            )
 
-                            # Preserve V8.1 working behavior.
-                            # Do not discard source videos here.
-                            if v81_is_export(src, c):
-                                log(
-                                    'V10: Bỏ video đã xuất: '
-                                    + str(src)
-                                )
-                                continue
+                        # Preserve V8.1 working behavior.
+                        # Do not discard source videos here.
+                        if v81_is_export(src, c):
+                            log(
+                                'V10: Bỏ video đã xuất: '
+                                + str(src)
+                            )
+                            continue
 
-                        pools[kind].append(src)
+                    pools[kind].append(src)
 
-                    except Exception as e:
-                        log(f'Bỏ qua {src}: {e}')
+                except Exception as e:
+                    log(f'Bỏ qua {src}: {e}')
 
             log(
                 f'Phần {n} | {kind}: '
                 f'{len(pools[kind])} file | folder: '
                 + (
                     ', '.join(map(str, folders))
-                    or 'KHÔNG TÌM THẤY'
+                    or ('AUTO PROJECT: thư viện chung' if shared is not None else 'KHÔNG TÌM THẤY')
                 )
             )
 
@@ -294,7 +297,10 @@ def plan(c, log):
 
         if not pools['image'] and not pools['video']:
             raise ValueError(f'FOLDER LOCK: Phần {n} không có tư liệu trong thư mục riêng. Không lấy chéo.')
-        log(f'FOLDER LOCK: Phần {n} chỉ sử dụng tư liệu trong thư mục cùng số.')
+        if shared is not None:
+            log(f'AUTO PROJECT: Phần {n} sử dụng thư viện tư liệu chung của dự án.')
+        else:
+            log(f'FOLDER LOCK: Phần {n} chỉ sử dụng tư liệu trong thư mục cùng số.')
 
         aligned = []
 
