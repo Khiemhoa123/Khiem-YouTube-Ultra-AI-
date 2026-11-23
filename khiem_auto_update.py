@@ -66,6 +66,7 @@ class UI:
         self.selected = {}
         self.busy = False
         self.auto_install = "--one-click" in sys.argv
+        self.pending_auto_install = False
         self.mode = tk.StringVar(value="full" if self.auto_install else "safe")
         self.backup = tk.BooleanVar(value=True)
         self.verify = tk.BooleanVar(value=True)
@@ -141,6 +142,9 @@ class UI:
         self.busy = False
         self.check_btn.configure(state="normal")
         self.refresh()
+        if self.pending_auto_install:
+            self.pending_auto_install = False
+            self.root.after(100, self.install)
 
     def check(self):
         def work():
@@ -169,8 +173,9 @@ class UI:
                 f"GitHub {self.revision[:12]} | {len(result)} file thay đổi | Thư mục: {ROOT}"))
             self.log("Đã kiểm tra: " + str(len(result)) + " file thay đổi.")
             if self.auto_install:
-                self.root.after(0, self.install if result else
-                                lambda: messagebox.showinfo("Cập nhật", "Đã là phiên bản mã nguồn mới nhất."))
+                self.pending_auto_install = bool(result)
+                if not result:
+                    self.root.after(0, lambda: messagebox.showinfo("Cập nhật", "Đã là phiên bản mã nguồn mới nhất."))
         self.task(work)
 
     def refresh(self):
