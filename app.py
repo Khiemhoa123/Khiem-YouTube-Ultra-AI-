@@ -151,12 +151,15 @@ def plan(c, log):
         "voices": [(n, str(p), p.stat().st_size, p.stat().st_mtime_ns)
                    for n, p in sorted(voices.items())],
         "speed": c.get("speed", "Smart"),
-        "video_goal": c.get("target_video_percent", 60)
+        "video_goal": c.get("target_video_percent", 60),
+        "min_video": c.get("min_video_percent", 30),
+        "planner_revision": "scan_all_balance_20261123"
     }, sort_keys=True, ensure_ascii=False).encode("utf-8")).digest()
     rng = random.Random(int.from_bytes(seed[:8], "big"))
     used = set()
     used_images = []
     intervals = {}
+    video_source_use = {}
     hashes = {}
     lens = {}
     label_cache = {}
@@ -448,6 +451,11 @@ def plan(c, log):
                     if overlap:
                         continue
 
+                if kind == 'video':
+                    # Every usable downloaded source gets a fair chance before
+                    # returning to a source already represented on the timeline.
+                    score += 2.5 if video_source_use.get(h, 0) == 0 else 0.0
+                    score -= min(1.0, video_source_use.get(h, 0) * 0.15)
                 candidates.append((
                     score,
                     gap,
@@ -464,7 +472,7 @@ def plan(c, log):
             )
 
         smart_timeline = str(c.get('smart_timeline', '1')).lower() not in ('0', 'false', 'off')
-        min_video = max(0.0, min(1.0, float(c.get('min_video_percent', 40)) / 100))
+        min_video = max(0.30, min(1.0, float(c.get('min_video_percent', 30)) / 100))
         goal_video = max(min_video, min(1.0, float(c.get('target_video_percent', 60)) / 100))
         video_frames = 0
         warned_shortage = False
@@ -554,15 +562,20 @@ def plan(c, log):
                 best_image = max((o for o in options if o[0] == 'image'),
                                  key=option_score, default=None)
                 best_video = max(videos, key=option_score, default=None)
-                # Do not force a clearly unrelated video merely to meet quota.
-                video_relevant = best_video is not None and (
-                    best_image is None or best_video[2][0] >= best_image[2][0] - 0.85
-                )
-                eligible = [o for o in options if o[0] != 'video' or video_relevant]
-                if video_relevant and (image_streak >= 3 or video_frames < goal_video * pos):
+                # Video sources have already been filtered by the creator.
+                # Use all valid footage, even when semantic matching is weak.
+                # Reserve enough timeline to reach the minimum when possible.
+                remaining = target - pos
+                required = max(0, math.ceil(min_video * target) - video_frames)
+                last_is_video = bool(clips and clips[-1]['type'] == 'video')
+                urgent = required >= remaining - 2 * fps
+                if best_video and (urgent or (not last_is_video and
+                        (required > 0 or image_streak >= 3 or video_frames < goal_video * pos))):
                     chosen = best_video
+                elif best_image:
+                    chosen = best_image
                 else:
-                    chosen = max(eligible or options, key=option_score)
+                    chosen = best_video or max(options, key=option_score)
                 if image_streak >= 3 and chosen[0] == 'image':
                     log(f'Phần {n}: vượt 3 ảnh liên tiếp do thiếu video phù hợp.')
                 kind, nf, selected = chosen
@@ -608,6 +621,7 @@ def plan(c, log):
                     start,
                     start + t
                 ))
+                video_source_use[h] = video_source_use.get(h, 0) + 1
 
             clips.append(dict(
                 part=n,
@@ -634,7 +648,7 @@ def plan(c, log):
             log(f'AI SMART TIMELINE phần {n}: video {actual:.1f}% theo thời lượng; '
                 f'tối thiểu {min_video*100:.0f}%, mục tiêu {goal_video*100:.0f}%.')
             if actual + 0.01 < min_video * 100:
-                log(f'CẢNH BÁO: Phần {n} không đủ video để đạt tỷ lệ tối thiểu.')
+                log(f'CẢNH BÁO: Phần {n} chưa đạt 30% video; nguồn hợp lệ hoặc vị trí dựng không đủ. Đã tận dụng các cảnh video có thể chọn.')
 
         parts.append(dict(
             number=n,
