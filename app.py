@@ -220,14 +220,21 @@ def plan(c, log):
                 # AUTO PROJECT: strict numbered-folder ownership for every voice section.
                 # Never borrow media from another section or from unnumbered folders.
                 project_base = Path(c['project_folder']).expanduser().resolve()
-                media_root = project_base / ('03 - Hinh Anh' if kind == 'image' else '04 - Video')
+                # Support both structured and legacy Vietnamese project folders.
+                aliases = ('03 - Hinh Anh', 'ảnh') if kind == 'image' else ('04 - Video', 'video')
+                media_roots = [project_base / name for name in aliases
+                               if (project_base / name).is_dir()]
                 candidates = shared[kind + 's']
                 def section_owner(src):
-                    relative = src.resolve().relative_to(media_root.resolve())
-                    return number(Path(relative.parts[0])) if len(relative.parts) > 1 else None
-                sources = [src for src in candidates
-                           if src.resolve().is_relative_to(media_root.resolve())
-                           and section_owner(src) == n]
+                    resolved = src.resolve()
+                    for media_root in media_roots:
+                        if not resolved.is_relative_to(media_root.resolve()):
+                            continue
+                        relative = resolved.relative_to(media_root.resolve())
+                        if len(relative.parts) > 1:
+                            return number(Path(relative.parts[0]))
+                    return None
+                sources = [src for src in candidates if section_owner(src) == n]
                 folders = sorted({src.parent for src in sources})
             else:
                 # Manual mode keeps strict numbered-folder ownership.
