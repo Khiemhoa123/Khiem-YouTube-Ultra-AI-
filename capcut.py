@@ -167,13 +167,20 @@ def export(c,parts,log):
     raise ValueError('CapCut QA: overlapping or out-of-range segment')
    previous_end=target['start']+target['duration']
  log('CapCut QA: material IDs, references and timeline OK.')
- # Write matching root and nested timeline, without stale attachment IDs.
+ # Stage outside the CapCut project scanner, then publish the complete folder.
+ import tempfile
+ stage=Path(tempfile.mkdtemp(prefix='khiem_draft_',dir=str(root.parent)))
+ final_dest=dest
+ dest=stage
+ dt=dest/'Timelines'/tid
  try:
   for folder in (dest,dt):
    for name in ('draft_content.json','draft_content.json.bak','template-2.tmp'):write(folder/name,d)
   write(dt/'template.tmp',d); write(dest/'draft_meta_info.json',meta); write(dest/'Timelines/project.json',project); write(dest/'Timelines/project.json.bak',project); write(dest/'timeline_layout.json',layout); write(dest/'draft_virtual_store.json',store)
   first=next(iter(tracks['video']['segments'])); source=next(x['path'] for x in mts['videos'] if x['id']==first['material_id']); subprocess.run(['ffmpeg','-v','error','-y','-i',source,'-frames:v','1','-vf','scale=480:-2',str(dest/'draft_cover.jpg')],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),capture_output=True)
   if (dest/'draft_cover.jpg').exists():shutil.copyfile(dest/'draft_cover.jpg',dt/'draft_cover.jpg')
+  os.rename(stage,final_dest)
+  dest=final_dest
  except Exception:
-  shutil.rmtree(dest,ignore_errors=True); raise
+  shutil.rmtree(stage,ignore_errors=True); raise
  log('Đã ghi dự án: '+str(dest)+' | Mở lại CapCut để kiểm tra. Chuyển cảnh native thử nghiệm; tạo phụ đề trong CapCut Pro nếu cần.'); return dest
