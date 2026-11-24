@@ -32,12 +32,18 @@ class Semantic:
    try:
     with torch.inference_mode():
      test=self.processor(text=['test'],return_tensors='pt',padding=True).to('cuda')
-     self.model.get_text_features(**test)
+     self._embedding(self.model.get_text_features(**test))
      torch.cuda.synchronize()
    except Exception as exc:
     log('CLIP CUDA khong tuong thich GPU; tu dong chuyen CPU: '+str(exc))
     self._cpu_fallback()
   log('CLIP local: '+self.device)
+ def _embedding(self, output):
+  # Transformers versions return either a tensor or projected pooled output.
+  v=output if self.torch.is_tensor(output) else getattr(output,'pooler_output',None)
+  if not self.torch.is_tensor(v):
+   raise TypeError('CLIP did not return a projected embedding tensor')
+  return v/v.norm(dim=-1,keepdim=True).clamp_min(1e-12)
  def _cpu_fallback(self):
   if self.device=='cpu': return
   self.device='cpu'
@@ -56,7 +62,7 @@ class Semantic:
     data=subprocess.check_output(['ffmpeg','-v','error','-ss',str(start),'-i',str(path),'-frames:v','1','-vf','scale=320:-2','-f','image2pipe','-vcodec','png','-'],stderr=subprocess.DEVNULL)
     im=self.Image.open(io.BytesIO(data)).convert('RGB')
    with self.torch.inference_mode():
-    v=self.model.get_image_features(**self.processor(images=im,return_tensors='pt').to(self.device)); v=v/v.norm(dim=-1,keepdim=True)
+    v=self.model.get_image_features(**self.processor(images=im,return_tensors='pt').to(self.device)); v=self._embedding(v)
    self.cache[key]=v.cpu().float(); self.db.execute("INSERT OR REPLACE INTO cache VALUES (?,?)",(disk,self.cache[key].numpy().tobytes())); self.db.commit(); return self.cache[key]
   except Exception as e:
    self.log('Không đọc được khung hình: '+str(path)+' '+str(e)); self.cache[key]=None; return None
@@ -67,14 +73,14 @@ class Semantic:
     with self.torch.inference_mode():
      v=self.model.get_text_features(**self.processor(text=[query],return_tensors='pt',padding=True,truncation=True,max_length=77).to(self.device))
      if self.device=='cuda': self.torch.cuda.synchronize()
-     self.texts[query]=(v/v.norm(dim=-1,keepdim=True)).cpu()
+     self.texts[query]=self._embedding(v).cpu()
    except RuntimeError as exc:
     if self.device!='cuda': raise
     self.log('CLIP CUDA loi luc cham diem, thu CPU: '+str(exc))
     self._cpu_fallback()
     with self.torch.inference_mode():
      v=self.model.get_text_features(**self.processor(text=[query],return_tensors='pt',padding=True,truncation=True,max_length=77).to('cpu'))
-     self.texts[query]=(v/v.norm(dim=-1,keepdim=True)).cpu()
+     self.texts[query]=self._embedding(v).cpu()
   offsets=[0] if kind=='image' else [length*.5] if self.mode=="Fast" else [length*.2,length*.5,length*.8]
   values=[]
   for offset in offsets:
