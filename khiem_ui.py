@@ -2367,6 +2367,18 @@ class KhiemYoutube:
             self.log("LỖI:\\n" + failure)
 
         finally:
+            # Release unreachable AI objects before enabling the next job.
+            # Never terminate external processes or purge persistent caches.
+            try:
+                import gc
+                import sys
+                gc.collect()
+                torch = sys.modules.get("torch")
+                if torch is not None and torch.cuda.is_initialized():
+                    torch.cuda.empty_cache()
+                self.log("CLEANUP: Da thu gom RAM va giai phong CUDA cache khong su dung.")
+            except Exception as cleanup_error:
+                self.log("CLEANUP: " + str(cleanup_error))
             self.root.after(0, lambda: self.finish(success, failure, from_queue))
 
     def finish(self, success=True, failure="", from_queue=False):
