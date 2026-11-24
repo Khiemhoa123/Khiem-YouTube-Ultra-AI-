@@ -87,11 +87,17 @@ class Semantic:
    v=self.feature(kind,path,start+offset)
    if v is not None:values.append(float((v*self.texts[query]).sum()))
   return sum(values)/len(values) if values else -1
- def transcribe(self,path):
+ def transcribe(self,path,script=''):
+  # Infer English or German from common script function words; otherwise auto-detect.
+  tokens=re.findall(r'[^\W\d_]+',script.lower())
+  en=sum(w in {'the','and','of','to','was','were','with','that','his','her','you','have','they','from'} for w in tokens)
+  de=sum(w in {'der','die','das','und','ist','war','mit','ich','nicht','den','dem','ein','eine','von','auf','sich','zu'} for w in tokens)
+  language='en' if en>=3 and en>2*de else 'de' if de>=3 and de>2*en else None
+  self.log('Whisper language: '+(language or 'auto'))
   # Cache complete word-level transcripts; unchanged audio skips Whisper.
   p=Path(path).resolve()
   st=p.stat()
-  key=json.dumps(['whisper-base-words-v1',str(p),st.st_size,st.st_mtime_ns])
+  key=json.dumps(['whisper-base-words-v2',language,str(p),st.st_size,st.st_mtime_ns])
   self.db.execute('CREATE TABLE IF NOT EXISTS transcripts (k TEXT PRIMARY KEY, v TEXT NOT NULL)')
   hit=self.db.execute('SELECT v FROM transcripts WHERE k=?',(key,)).fetchone()
   if hit:
@@ -105,7 +111,7 @@ class Semantic:
   import numpy as np
   raw=subprocess.check_output(['ffmpeg','-v','error','-i',str(p),'-vn','-ac','1','-ar','16000','-f','f32le','-'])
   audio=np.frombuffer(raw,dtype='<f4').copy()
-  seg,_=self.whisper.transcribe(audio,beam_size=1,word_timestamps=True)
+  seg,_=self.whisper.transcribe(audio,beam_size=1,word_timestamps=True,language=language)
   result=[(w.start,w.end,w.word) for s in seg for w in (s.words or [])]
   self.db.execute('INSERT OR REPLACE INTO transcripts(k,v) VALUES (?,?)',(key,json.dumps(result)))
   self.db.commit()
