@@ -360,29 +360,33 @@ def insert_interview_cutaways(parts, intro, c, log):
                 runs[-1][1] = max(runs[-1][1], b)
             else:
                 runs.append([a, b])
-        for a, b in runs:
-            low = max(a, start + min_gap)
-            high = min(b - 2.0, finish - min_gap - 2.0)
-            for vs, ve in video_ranges:
-                if ve <= a and ve + min_gap > low:
-                    low = max(low, ve + min_gap)
-                if vs >= b and vs - min_gap - 2.0 < high:
-                    high = min(high, vs - min_gap - 2.0)
-            if high < low - 1.0 / fps:
-                continue
-            # A video inside a candidate run is always forbidden.
-            t = round(((low + high) / 2.0) * fps) / fps
-            if any(t < ve + min_gap and t + 2.0 > vs - min_gap
-                   for vs, ve in video_ranges):
-                continue
-            positions.append(t)
-        # Prefer a location around the middle of the Number to avoid
-        # repeated back-to-back interview shots at section boundaries.
-        midpoint = (start + finish) / 2.0
-        positions.sort(key=lambda t: abs((t + 1.0) - midpoint))
+        # Relax spacing only when the preferred spacing cannot fit.
+        import math
+        for min_gap in (3.0, 2.0, 1.0, 0.0):
+            for a, b in runs:
+                low = max(a, start + min_gap)
+                high = min(b - 2.0, finish - min_gap - 2.0)
+                for vs, ve in video_ranges:
+                    if ve <= a + 1e-5:
+                        low = max(low, ve + min_gap)
+                    if vs >= b - 1e-5:
+                        high = min(high, vs - min_gap - 2.0)
+                lo = math.ceil((low - 1e-6) * fps)
+                hi = math.floor((high + 1e-6) * fps)
+                if hi < lo:
+                    continue
+                t = ((lo + hi) // 2) / fps
+                if any(t < ve + min_gap - 1e-5 and t + 2.0 > vs - min_gap + 1e-5
+                       for vs, ve in video_ranges):
+                    continue
+                positions.append(t)
+            if positions:
+                positions.sort()
+                log(f"INTERVIEW Number {number}: khoang cach video {min_gap:.0f}s.")
+                break
         if not positions:
             raise RuntimeError(
-                f"Number {number}: khong co khoang anh lien tuc du 2 giay va cach video khac it nhat 3 giay. "
+                f"Number {number}: khong co khoang anh lien tuc du 2 giay. "
                 "Hay them anh hoac dieu chinh thoi luong canh.")
         choices = unique_candidates()
         if not choices:
