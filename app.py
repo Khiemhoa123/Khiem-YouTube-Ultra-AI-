@@ -217,11 +217,18 @@ def plan(c, log):
         ]:
             base = Path(root).resolve()
             if shared is not None:
-                # AUTO PROJECT intentionally shares discovered media across all sections.
-                # No copying; interview and export folders were excluded by discover().
-                folders = []
-                allowed = set(shared[kind + 's'])
-                sources = sorted(allowed)
+                # AUTO PROJECT: strict numbered-folder ownership for every voice section.
+                # Never borrow media from another section or from unnumbered folders.
+                project_base = Path(c['project_folder']).expanduser().resolve()
+                media_root = project_base / ('03 - Hinh Anh' if kind == 'image' else '04 - Video')
+                candidates = shared[kind + 's']
+                def section_owner(src):
+                    relative = src.resolve().relative_to(media_root.resolve())
+                    return number(Path(relative.parts[0])) if len(relative.parts) > 1 else None
+                sources = [src for src in candidates
+                           if src.resolve().is_relative_to(media_root.resolve())
+                           and section_owner(src) == n]
+                folders = sorted({src.parent for src in sources})
             else:
                 # Manual mode keeps strict numbered-folder ownership.
                 folders = sorted(
@@ -279,7 +286,7 @@ def plan(c, log):
                 f'{len(pools[kind])} file | folder: '
                 + (
                     ', '.join(map(str, folders))
-                    or ('AUTO PROJECT: thư viện chung' if shared is not None else 'KHÔNG TÌM THẤY')
+                    or 'KHÔNG TÌM THẤY'
                 )
             )
 
@@ -298,7 +305,7 @@ def plan(c, log):
         if not pools['image'] and not pools['video']:
             raise ValueError(f'FOLDER LOCK: Phần {n} không có tư liệu trong thư mục riêng. Không lấy chéo.')
         if shared is not None:
-            log(f'AUTO PROJECT: Phần {n} sử dụng thư viện tư liệu chung của dự án.')
+            log(f'AUTO PROJECT: Phần {n} chỉ sử dụng ảnh/video trong thư mục số {n}.')
         else:
             log(f'FOLDER LOCK: Phần {n} chỉ sử dụng tư liệu trong thư mục cùng số.')
 
@@ -484,7 +491,7 @@ def plan(c, log):
         video_frames = 0
         warned_shortage = False
         image_streak = 0
-        ts['video'] = [5, 6, 7, 8]
+        ts['video'] = [5, 6]
         ts['image'] = [4, 5, 6]
 
         while pos < target:
@@ -538,7 +545,7 @@ def plan(c, log):
 
                 candidate = pick(kind, nf, context, query)
                 if kind == 'video' and not candidate:
-                    for seconds in (7, 6, 5):
+                    for seconds in (6, 5):
                         smaller = min(target - pos, seconds * fps)
                         if smaller >= nf: continue
                         candidate = pick(kind, smaller, context, query)
