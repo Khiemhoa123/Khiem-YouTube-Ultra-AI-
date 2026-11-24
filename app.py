@@ -321,7 +321,7 @@ def plan(c, log):
         if c.get('align') and ai:
             log(f'Whisper: phần {n}')
             try:
-                aligned = ai.transcribe(p)
+                aligned = ai.transcribe(p, script)
             except Exception as e:
                 log(
                     'Whisper lỗi, dùng TXT ước tính: '
