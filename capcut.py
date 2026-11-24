@@ -148,6 +148,25 @@ def export(c,parts,log):
  w,h=map(int,c['res'].split('x')); d.update(path='',id=tid,name=c['name'],duration=round(elapsed*1e6),fps=float(c['fps']),tracks=list(tracks.values()),materials=mts,create_time=now,update_time=now); d['canvas_config'].update(width=w,height=h,ratio='16:9')
  meta.update(draft_id=pid,draft_name=c['name'],draft_fold_path=dest.as_posix(),draft_root_path=str(root),tm_duration=d['duration'],tm_draft_create=now,tm_draft_modified=now,draft_timeline_materials_size_=sum(Path(p).stat().st_size for _,p in seen)); meta['draft_materials'][0]['value']=entries
  project.update(id=uid(),main_timeline_id=tid,create_time=now,update_time=now); project['timelines'][0].update(id=tid,create_time=now,update_time=now); layout['dockItems'][0]['timelineIds']=[tid]; store['draft_virtual_store'][1]['value']=[{'child_id':e['id'],'parent_id':''} for e in entries]
+ # Validate references and time ranges before exposing a draft to CapCut.
+ ids=[m['id'] for ls in mts.values() if isinstance(ls,list) for m in ls if isinstance(m,dict) and 'id' in m]
+ if len(ids)!=len(set(ids)): raise ValueError('CapCut QA: duplicate material IDs')
+ known=set(ids)
+ segment_ids=set()
+ for track in tracks.values():
+  previous_end=0
+  for seg in track['segments']:
+   if seg['id'] in segment_ids: raise ValueError('CapCut QA: duplicate segment ID')
+   segment_ids.add(seg['id'])
+   if seg['material_id'] not in known or any(x not in known for x in seg['extra_material_refs']):
+    raise ValueError('CapCut QA: missing material reference')
+   target=seg['target_timerange']; source=seg['source_timerange']
+   if target['start']<0 or target['duration']<=0 or source['start']<0 or source['duration']<=0:
+    raise ValueError('CapCut QA: invalid time range')
+   if target['start']<previous_end-2 or target['start']+target['duration']>d['duration']+2:
+    raise ValueError('CapCut QA: overlapping or out-of-range segment')
+   previous_end=target['start']+target['duration']
+ log('CapCut QA: material IDs, references and timeline OK.')
  # Write matching root and nested timeline, without stale attachment IDs.
  try:
   for folder in (dest,dt):
