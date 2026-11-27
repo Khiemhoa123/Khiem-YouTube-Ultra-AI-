@@ -7,10 +7,10 @@ Tab này nhận một video phỏng vấn, nhận diện tối đa hai hoặc ba
 Phần mềm cần FFmpeg và FFprobe có trong PATH, cùng các thư viện Python:
 
 ```powershell
-python -m pip install torch torchaudio "pyannote.audio>=3.1,<4"
+python -m pip install "pyannote.audio==4.1.1" -c constraints_v12.txt
 ```
 
-Mở https://huggingface.co/pyannote/speaker-diarization-3.1 và https://huggingface.co/pyannote/segmentation-3.0 để chấp nhận điều kiện sử dụng mô hình. Tạo Hugging Face access token có quyền đọc. Dán token vào Tab 05 khi chạy. Token không được ghi vào cấu hình phần mềm.
+Mở https://huggingface.co/pyannote/speaker-diarization-community-1 để chấp nhận điều kiện sử dụng mô hình. Tạo Hugging Face access token có quyền đọc. Dán token vào Tab 05 khi chạy. Token không được ghi vào cấu hình phần mềm.
 
 ## Cách dùng
 
