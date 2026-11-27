@@ -14,7 +14,7 @@ import threading
 _PIPELINES = {}
 _PIPELINE_LOCK = threading.Lock()
 
-MODEL_ID = "pyannote/speaker-diarization-3.1"
+MODEL_ID = "pyannote/speaker-diarization-community-1"
 
 
 def _run(args):
@@ -56,7 +56,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         key = token.strip()
         pipeline = _PIPELINES.get(key)
         if pipeline is None:
-            pipeline = Pipeline.from_pretrained(MODEL_ID, use_auth_token=key)
+            pipeline = Pipeline.from_pretrained(MODEL_ID, token=key)
             if pipeline is None:
                 raise RuntimeError("Không tải được model. Kiểm tra token và quyền truy cập.")
             try:
@@ -118,6 +118,14 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             + embedding_id + ". V8.1 sẽ KHÔNG xuất MP3 nếu thiếu "
             "xác minh giọng. Lỗi: " + detail) from exc
 
+    from functools import lru_cache
+    import soundfile as sf
+
+    @lru_cache(maxsize=2)
+    def audio_input(wav):
+        samples, rate = sf.read(str(wav), dtype="float32", always_2d=True)
+        return {"waveform": torch.from_numpy(samples.T.copy()), "sample_rate": rate}
+
     def embedding(wav, left, right):
         """Compute verified speaker embedding for a clean turn."""
         if right - left < 2.3:
@@ -125,7 +133,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
         try:
             with _PIPELINE_LOCK, torch.inference_mode():
                 vector = np.asarray(embedding_infer.crop(
-                    str(wav), Segment(float(left), float(right)))).reshape(-1)
+                    audio_input(wav), Segment(float(left), float(right)))).reshape(-1)
             if not np.all(np.isfinite(vector)):
                 return None
             norm = np.linalg.norm(vector)
@@ -228,7 +236,7 @@ def export_speakers(video, output, token, target_seconds=35, speakers=None, log=
             window_files.append(wav)
             t0 = time.monotonic()
             with _PIPELINE_LOCK:
-                diarization = pipeline(str(wav))
+                diarization = pipeline(audio_input(wav))
             rows = _segments(diarization)
             groups = clean_turns(rows, length)
             log(f"AI xong đoạn {part+1} sau {time.monotonic()-t0:.0f}s: "
