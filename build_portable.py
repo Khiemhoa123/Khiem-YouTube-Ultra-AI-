@@ -67,7 +67,7 @@ def main():
         raise RuntimeError("Chỉ hỗ trợ đóng gói trên Windows.")
     if not (ROOT / "khiem_ui.py").is_file():
         raise RuntimeError("Thiếu khiem_ui.py trong thư mục nguồn.")
-    for package in ("PyInstaller", "torch", "transformers", "faster_whisper", "ctranslate2"):
+    for package in ("PyInstaller", "torch", "transformers", "faster_whisper", "ctranslate2", "pyannote.audio", "torchcodec", "soundfile"):
         if importlib.util.find_spec(package) is None:
             raise RuntimeError("Thiếu thư viện " + package + ". Cài vào đúng Python đang build.")
     import torch
@@ -122,6 +122,13 @@ def main():
         "--collect-submodules", "transformers.models.clip",
         "--collect-data", "transformers",
         "--collect-data", "tokenizers",
+        "--collect-all", "pyannote.audio",
+        "--collect-all", "pyannote.core",
+        "--collect-all", "pyannote.pipeline",
+        "--collect-all", "pyannote.database",
+        "--collect-all", "torchcodec",
+        "--recursive-copy-metadata", "pyannote.audio",
+        "--hidden-import", "soundfile",
     ]
     def add_data(source, target):
         command.extend(["--add-data", str(source) + os.pathsep + target])
