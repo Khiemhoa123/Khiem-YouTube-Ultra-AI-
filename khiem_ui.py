@@ -839,6 +839,7 @@ class KhiemYoutube:
         self.creator_channel_dropdown.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.studio_button(row, "+ THÊM KÊNH", self.creator_show_add_channel, primary=True).pack(side="left", padx=(0, 6))
         self.studio_button(row, "SỬA KÊNH", self.creator_show_edit_channel).pack(side="left")
+        self.studio_button(channel, "NHẬP THƯ MỤC KÊNH CŨ", self.creator_import_channel).pack(anchor="w", pady=(8, 0))
         self.creator_channel_suggestions = tk.Listbox(channel, height=5, exportselection=False, bg=COLORS["input"], fg=COLORS["text"], selectbackground=COLORS["accent"], selectforeground=COLORS["bg"], relief="flat", highlightthickness=0)
         self.creator_channel_suggestions.bind("<ButtonRelease-1>", lambda _e: self.creator_pick_suggestion("channel"))
         ttk.Label(channel, textvariable=self.creator_channel_path_text,
@@ -1160,6 +1161,37 @@ class KhiemYoutube:
                 "Đã tạo và lưu kênh mới. Kênh cũ và các dự án cũ vẫn giữ nguyên.")
         except (OSError, ValueError) as exc:
             messagebox.showerror("Không thể tạo kênh mới", str(exc))
+
+    def creator_import_channel(self):
+        if self.busy or self.queue_running:
+            messagebox.showwarning("Đang xử lý", "Hãy đợi tác vụ hoàn thành.")
+            return
+        selected = filedialog.askdirectory(title="Chọn thư mục kênh chứa các dự án cũ")
+        if not selected:
+            return
+        previous = dict(self.creator_channels)
+        try:
+            folder = Path(selected).resolve()
+            name = folder.name
+            self.creator_validate_name(name, "Tên kênh")
+            for existing, path in self.creator_channels.items():
+                if os.path.normcase(str(Path(path).resolve())) == os.path.normcase(str(folder)):
+                    self.creator_channel.set(existing)
+                    self.creator_refresh()
+                    return
+            if any(k.casefold() == name.casefold() for k in self.creator_channels):
+                raise ValueError("Tên kênh đã tồn tại với đường dẫn khác. Hãy dùng SỬA KÊNH nếu muốn đổi đường dẫn.")
+            self.creator_channels[name] = str(folder)
+            self.creator_save_channels()
+        except (OSError, ValueError) as exc:
+            self.creator_channels = previous
+            messagebox.showerror("Nhập thư mục kênh", str(exc))
+            return
+        self.creator_channel_search.set("")
+        self.creator_refresh_channels()
+        self.creator_channel.set(name)
+        self.creator_refresh()
+        messagebox.showinfo("Nhập thư mục kênh", f"Đã nhập {name}: {len(self.creator_project_names)} dự án có cấu trúc chuẩn. Không thay đổi tư liệu gốc.")
 
     def creator_load_channels(self):
         try:
